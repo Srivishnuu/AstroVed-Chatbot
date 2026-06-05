@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>AstroVed.AI Chatbot</title>
+<title>AstroVed AI Chatbot</title>
 <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet"/>
 <style>
   :root {
@@ -606,7 +606,7 @@
 let isOpen  = false;
 let userName = '';
 let history  = [];   // [{role,content}]
-const API    = 'http://localhost:8000'; // ← change to your Render URL
+const API    = 'https://astroved-chatbot.onrender.com'; // ← change to your Render URL
 const SESSION = 'sess_' + Math.random().toString(36).slice(2);
 
 function toggleChat() {
