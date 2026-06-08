@@ -118,6 +118,6 @@ async def chat(req: ChatRequest):
 def root():
     return {
         "status": "AstroVed.AI is online",
-        "model": "llama3-8b-8192",
+        "model": "llama-3.1-8b-instant",
         "api_key_loaded": bool(GROQ_API_KEY)
     }
