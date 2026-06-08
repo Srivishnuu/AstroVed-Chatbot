@@ -104,7 +104,7 @@ async def chat(req: ChatRequest):
             model="llama-3.1-8b-instant",
             messages=messages,
             max_tokens=200,
-            temperature=0.4,
+            temperature=0.6,
         )
 
         reply = response.choices[0].message.content
