@@ -111,7 +111,7 @@ async def chat(req: ChatRequest):
         )
 
         reply = response.choices[0].message.content
-        save_message(req.session_id, "assistant", reply)
+        save_message(req.session_id, "Assistant", reply)
         return {"reply": reply}
 
     except Exception as e:
