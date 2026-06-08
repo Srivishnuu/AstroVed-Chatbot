@@ -18,10 +18,16 @@ client = Groq(api_key=GROQ_API_KEY)
 # ── CORS ─────────────────────────────────────────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "https://srivishnuu.github.io",
+        "http://localhost:5500",
+        "http://127.0.0.1:5500"
+    ],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 # ── System prompt ─────────────────────────────────────────────────────────────
 SYSTEM_PROMPT = """You are AstroVed.AI, an expert Vedic astrology assistant 
