@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from groq import Groq
@@ -7,44 +7,65 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-app = FastAPI()
-client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+# ── Validate API key on startup ──────────────────────────────────────────────
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+if not GROQ_API_KEY:
+    raise RuntimeError("GROQ_API_KEY not found in .env file!")
 
-# Allow your frontend domain
+app = FastAPI()
+client = Groq(api_key=GROQ_API_KEY)
+
+# ── CORS ─────────────────────────────────────────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # restrict to your domain in production
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# SQLite setup
+# ── System prompt ─────────────────────────────────────────────────────────────
+SYSTEM_PROMPT = """You are AstroVed.AI, an expert Vedic astrology assistant 
+for the AstroVed website. Help users with:
+- Birth chart readings and analysis
+- Planetary transits and their effects
+- Love and relationship compatibility
+- Career and financial guidance based on astrology
+- Daily, weekly, monthly horoscopes
+- Gemstone and remedy recommendations
+- Puja and ritual guidance
+
+Be warm, knowledgeable, and mystical in tone.
+Keep answers concise, helpful, and specific.
+If asked about payments, billing, refunds, or confidential account matters,
+say: 'For this, let me connect you with our specialist team.' and stop."""
+
+# ── SQLite setup ──────────────────────────────────────────────────────────────
 def init_db():
     conn = sqlite3.connect("chat.db")
     conn.execute("""
         CREATE TABLE IF NOT EXISTS messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
             session_id TEXT,
-            role TEXT,
-            content TEXT,
+            role       TEXT,
+            content    TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
     conn.commit()
     conn.close()
 
-init_db()
-
 def get_history(session_id: str):
     conn = sqlite3.connect("chat.db")
     rows = conn.execute(
-        "SELECT role, content FROM messages WHERE session_id=? ORDER BY created_at LIMIT 20",
+        """SELECT role, content FROM messages 
+           WHERE session_id=? 
+           ORDER BY created_at DESC LIMIT 10""",
         (session_id,)
     ).fetchall()
     conn.close()
-    return [{"role": r, "content": c} for r, c in rows]
+    return [{"role": r, "content": c} for r, c in reversed(rows)]
 
-def save_message(session_id, role, content):
+def save_message(session_id: str, role: str, content: str):
     conn = sqlite3.connect("chat.db")
     conn.execute(
         "INSERT INTO messages (session_id, role, content) VALUES (?,?,?)",
@@ -53,31 +74,50 @@ def save_message(session_id, role, content):
     conn.commit()
     conn.close()
 
+init_db()
+
+# ── Request model ─────────────────────────────────────────────────────────────
 class ChatRequest(BaseModel):
     session_id: str
     message: str
 
+# ── Chat endpoint ─────────────────────────────────────────────────────────────
 @app.post("/chat")
 async def chat(req: ChatRequest):
-    history = get_history(req.session_id)
-    save_message(req.session_id, "user", req.message)
+    try:
+        history = get_history(req.session_id)
+        save_message(req.session_id, "user", req.message)
 
-    messages = [
-        {"role": "system", "content": "You are a helpful assistant on this website. Be concise and friendly."},
-        *history,
-        {"role": "user", "content": req.message}
-    ]
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            *history,
+            {"role": "user", "content": req.message}
+        ]
 
-    response = client.chat.completions.create(
-        model="llama3-8b-8192",
-        messages=messages,
-        max_tokens=500
-    )
+        response = client.chat.completions.create(
+            model="llama3-8b-8192",
+            messages=messages,
+            max_tokens=500,
+            temperature=0.7,
+        )
 
-    reply = response.choices[0].message.content
-    save_message(req.session_id, "assistant", reply)
-    return {"reply": reply}
+        reply = response.choices[0].message.content
+        save_message(req.session_id, "assistant", reply)
+        return {"reply": reply}
 
+    except Exception as e:
+        # Print error in terminal for debugging
+        print(f"ERROR in /chat: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Chat error: {str(e)}"
+        )
+
+# ── Health check ──────────────────────────────────────────────────────────────
 @app.get("/")
 def root():
-    return {"status": "ok"}
+    return {
+        "status": "AstroVed.AI is online",
+        "model": "llama3-8b-8192",
+        "api_key_loaded": bool(GROQ_API_KEY)
+    }
