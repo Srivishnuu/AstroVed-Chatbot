@@ -97,11 +97,15 @@ def get_history(session_id: str):
     rows = conn.execute(
         """SELECT role, content FROM messages 
            WHERE session_id=? 
+           AND role IN ('user', 'assistant')
            ORDER BY created_at DESC LIMIT 10""",
         (session_id,)
     ).fetchall()
     conn.close()
-    return [{"role": r, "content": c} for r, c in reversed(rows)]
+    # Filter only valid roles
+    valid = [{"role": r, "content": c} for r, c in reversed(rows) 
+             if r in ("user", "assistant")]
+    return valid
 
 def save_message(session_id: str, role: str, content: str):
     conn = sqlite3.connect("chat.db")
@@ -126,30 +130,26 @@ async def chat(req: ChatRequest):
         history = get_history(req.session_id)
         save_message(req.session_id, "user", req.message)
 
-        messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            *history,
-            {"role": "user", "content": req.message}
-        ]
+        # Build clean messages — only valid roles
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+        for h in history:
+            if h["role"] in ("user", "assistant"):
+                messages.append(h)
+        messages.append({"role": "user", "content": req.message})
 
         response = client.chat.completions.create(
             model="llama-3.1-8b-instant",
             messages=messages,
-            max_tokens=200,
-            temperature=0.6,
+            max_tokens=300,
+            temperature=0.7,
         )
-
         reply = response.choices[0].message.content
-        save_message(req.session_id, "Assistant", reply)
+        save_message(req.session_id, "assistant", reply)
         return {"reply": reply}
 
     except Exception as e:
-        # Print error in terminal for debugging
         print(f"ERROR in /chat: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Chat error: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Chat error: {str(e)}")
 
 # ── Health check ──────────────────────────────────────────────────────────────
 @app.get("/")
