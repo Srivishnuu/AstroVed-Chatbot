@@ -389,8 +389,16 @@ const LOGO_SRC = document.querySelector('#trig img').src;
 
 function botMsg(t){
   const m=document.getElementById('msgs');
-  const r=document.createElement('div');r.className='mrow bot';
-  r.innerHTML='<div class="av bot"><img src="'+LOGO_SRC+'" alt="bot"/></div><div class="bbl bot">'+esc(t)+'</div>';
+  const r=document.createElement('div');
+  r.className='mrow bot';
+  // Clean markdown formatting
+  const clean = t
+    .replace(/\*\*(.*?)\*\*/g, '$1')  // remove **bold**
+    .replace(/\*(.*?)\*/g, '$1')       // remove *italic*
+    .replace(/#{1,6}\s/g, '')          // remove ## headers
+    .replace(/`(.*?)`/g, '$1')         // remove `code`
+    .replace(/\n/g, '<br>');           // newline to <br>
+  r.innerHTML='<div class="av bot"><img src="'+LOGO_SRC+'" alt="bot"/></div><div class="bbl bot">'+clean+'</div>';
   m.appendChild(r);scrl();
 }
 
