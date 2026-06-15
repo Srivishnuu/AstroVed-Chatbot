@@ -4,7 +4,7 @@ from urllib.parse import urljoin, urlparse
 import time
 
 # ← Unoda website URL pottu
-BASE_URL = "https://qa.astroved.com/"
+BASE_URL = "https://astroved.com/"
 
 visited = set()
 all_text = []
@@ -25,7 +25,7 @@ def scrape_page(url):
         
         # Remove unwanted tags
         for tag in soup(["script", "style", "nav", 
-                         "footer", "header", "aside"]):
+                         "footer", "header", "aside", "form", "input", "button", "Link"]):
             tag.decompose()
         
         # Extract clean text
