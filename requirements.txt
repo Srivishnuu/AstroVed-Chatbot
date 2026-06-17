@@ -3,3 +3,6 @@ uvicorn[standard]
 groq
 python-dotenv
 httpx
+requests
+beautifulsoup4
+lxml
