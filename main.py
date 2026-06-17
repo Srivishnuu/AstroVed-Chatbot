@@ -1,9 +1,8 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from groq import Groq
-import sqlite3, os, asyncio, httpx
+import sqlite3, os, asyncio, httpx, re
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 
@@ -14,72 +13,88 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 if not GROQ_API_KEY:
     raise RuntimeError("GROQ_API_KEY not found in .env file!")
 
-# Load website knowledge base
-def load_knowledge():
+# ── Load knowledge base into searchable chunks ────────────────────────────────
+KB_CHUNKS = []  # list of {"title": ..., "url": ..., "text": ...}
+
+def load_knowledge_base():
+    """Parse knowledge_base.txt into per-page chunks for keyword search."""
+    chunks = []
     try:
         with open("knowledge_base.txt", "r", encoding="utf-8") as f:
             content = f.read()
-            return content[:12000]  # Limit to fit context window
-    except:
+
+        # Split by page markers: "--- PAGE: Title (url) ---"
+        parts = re.split(r"\n--- PAGE: (.*?) \((https?://[^\)]+)\) ---\n", content)
+        # parts[0] is empty/junk before first marker
+        # then triplets: title, url, text
+        for i in range(1, len(parts) - 2, 3):
+            title = parts[i].strip()
+            url = parts[i + 1].strip()
+            text = parts[i + 2].strip()
+            if text:
+                chunks.append({"title": title, "url": url, "text": text[:1500]})
+
+        print(f"Loaded {len(chunks)} page chunks from knowledge base")
+    except Exception as e:
+        print(f"Could not load knowledge_base.txt: {e}")
+    return chunks
+
+KB_CHUNKS = load_knowledge_base()
+
+def search_knowledge(query: str, top_k: int = 3):
+    """Simple keyword-overlap search — finds most relevant page chunks."""
+    if not KB_CHUNKS:
+        return ""
+    query_words = set(re.findall(r"[a-zA-Z]{3,}", query.lower()))
+    if not query_words:
         return ""
 
-KNOWLEDGE = load_knowledge()
+    scored = []
+    for chunk in KB_CHUNKS:
+        haystack = (chunk["title"] + " " + chunk["text"]).lower()
+        score = sum(1 for w in query_words if w in haystack)
+        if score > 0:
+            scored.append((score, chunk))
 
-# ── System prompt ─────────────────────────────────────────────────────────────
-SYSTEM_PROMPT = """You are AstroVed.AI, a Vedic astrology assistant for AstroVed website.
+    scored.sort(key=lambda x: x[0], reverse=True)
+    top_chunks = [c for _, c in scored[:top_k]]
+
+    if not top_chunks:
+        return ""
+
+    result = ""
+    for c in top_chunks:
+        result += f"\n[Page: {c['title']}]\nURL: {c['url']}\n{c['text'][:800]}\n"
+    return result
+
+# ── System prompt (base, knowledge injected per-request) ──────────────────────
+BASE_SYSTEM_PROMPT = """You are AstroVed.AI, a Vedic astrology assistant for AstroVed website.
 
 RULES:
-- Answer based on the WEBSITE CONTENT below when relevant
+- Answer using the WEBSITE CONTENT provided below when relevant to the question
 - Keep replies short: max 3-4 lines
-- If user asks types/list → show numbered list, wait for selection
-- After selection → explain in 3-4 lines
+- If user asks types/list/categories -> show short numbered list, wait for selection
+- After selection -> explain in 3-4 lines only
 - Be warm, mystical, helpful always
-
-=== ASTROVED WEBSITE CONTENT ===
-{KNOWLEDGE}
-=== END OF CONTENT ===
-
-If answer not in content above, use general Vedic astrology knowledge.
+- If website content is provided and has a relevant product/page URL, mention you can share the link
+- If no relevant website content given, answer using general Vedic astrology knowledge
+- Never refuse a question
 
 CONFIDENTIAL EXCEPTION:
-If payment/billing/refund/account details asked → say:
-'Let me connect you with our specialist team.' and stop
-
-RULES:
-- Answer ALL questions the user asks — no restrictions
-- Keep replies short: max 3-4 lines
-- If user asks types/list → show numbered list, wait for selection
-- After selection → explain in 3-4 lines
-- Be warm, mystical, helpful always
-- Never refuse any question
-
-TOPICS (but not limited to):
-Birth charts, Transits, Compatibility, Career, Horoscopes,
-Gemstones, Yantras, Pujas, Mantras, Remedies, Numerology,
-Vastu, Palmistry, Tarot, Hindu festivals, Vedic rituals
-
-STRICT FORMAT RULES:
-- NEVER use markdown: no **, no ##, no *, no bullet points with *
-- Plain text only
-- Max 3-4 lines per reply
-- Use numbered lists only when showing options
-...
-
-CONFIDENTIAL EXCEPTION ONLY:
-If payment/billing/refund/account details asked → say:
+If payment/billing/refund/account details asked -> say exactly:
 'Let me connect you with our specialist team.' and stop."""
 
 # ── Keep-alive (prevents Render free tier sleeping) ───────────────────────────
 async def keep_alive():
-    await asyncio.sleep(60)  # Wait 1 min after startup
+    await asyncio.sleep(60)
     while True:
         try:
             async with httpx.AsyncClient(timeout=10) as c:
                 r = await c.get("https://astroved-chatbot.onrender.com/")
-                print(f"Keep-alive ping ✅ status={r.status_code}")
+                print(f"Keep-alive ping OK status={r.status_code}")
         except Exception as e:
             print(f"Keep-alive failed (ok): {e}")
-        await asyncio.sleep(600)  # Ping every 10 minutes
+        await asyncio.sleep(600)
 
 @asynccontextmanager
 async def lifespan(app):
@@ -90,10 +105,9 @@ async def lifespan(app):
 app = FastAPI(lifespan=lifespan)
 client = Groq(api_key=GROQ_API_KEY)
 
-# ── CORS ──────────────────────────────────────────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins
+    allow_origins=["*"],
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -125,7 +139,6 @@ def get_history(session_id: str):
             (session_id,)
         ).fetchall()
         conn.close()
-        # Reverse to get chronological order + strict role filter
         history = []
         for r, c in reversed(rows):
             if r in ("user", "assistant") and c and str(c).strip():
@@ -158,53 +171,38 @@ class ChatRequest(BaseModel):
 @app.post("/chat")
 async def chat(req: ChatRequest):
     try:
-        # Step 1: Get history BEFORE saving new message
         history = get_history(req.session_id)
-
-        # Step 2: Save user message
         save_message(req.session_id, "user", req.message)
 
-        # Step 3: Build messages — STRICTLY only valid roles
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+        # Search knowledge base for relevant content based on this message
+        relevant_content = search_knowledge(req.message, top_k=3)
 
-        # Ensure alternating user/assistant pattern
+        system_content = BASE_SYSTEM_PROMPT
+        if relevant_content:
+            system_content += f"\n\n=== RELEVANT WEBSITE CONTENT ===\n{relevant_content}\n=== END CONTENT ==="
+
+        messages = [{"role": "system", "content": system_content}]
         for h in history:
             if h["role"] in ("user", "assistant"):
-                messages.append({
-                    "role": h["role"],
-                    "content": str(h["content"])
-                })
+                messages.append({"role": h["role"], "content": str(h["content"])})
+        messages.append({"role": "user", "content": str(req.message)})
 
-        # Add current user message
-        messages.append({
-            "role": "user",
-            "content": str(req.message)
-        })
+        print(f"Sending {len(messages)} messages, KB context: {len(relevant_content)} chars")
 
-        # Debug log
-        print(f"Sending {len(messages)} messages to Groq")
-
-        # Step 4: Call Groq
         response = client.chat.completions.create(
             model="llama-3.1-8b-instant",
             messages=messages,
-            max_tokens=1024,
+            max_tokens=600,
             temperature=0.7,
         )
 
         reply = response.choices[0].message.content
-
-        # Step 5: Save reply
         save_message(req.session_id, "assistant", reply)
-
         return {"reply": reply}
 
     except Exception as e:
         print(f"ERROR in /chat: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Chat error: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Chat error: {str(e)}")
 
 # ── Clear session endpoint ────────────────────────────────────────────────────
 @app.delete("/session/{session_id}")
@@ -224,5 +222,6 @@ def root():
     return {
         "status": "AstroVed.AI is online",
         "model": "llama-3.1-8b-instant",
-        "api_key_loaded": bool(GROQ_API_KEY)
+        "api_key_loaded": bool(GROQ_API_KEY),
+        "knowledge_chunks_loaded": len(KB_CHUNKS)
     }
