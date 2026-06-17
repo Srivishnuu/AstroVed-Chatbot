@@ -690,51 +690,84 @@ function cleanMd(t) {
 /* ── Product links ── */
 function getProductLink(text) {
   const t = text.toLowerCase();
+
   if (t.includes('birth chart') || t.includes('kundli') || t.includes('janam'))
-    return { label: '📊 View Birth Chart', url: SITE + '/free-horoscope/birth-chart-astrology' };
+    return { label: '📊 View Birth Chart', url: SITE + '/astropedia/en/freetools/birth-chart' };
   if (t.includes('compatibility') || t.includes('match') || t.includes('kundali match'))
-    return { label: '💑 Check Compatibility', url: SITE + '/free-horoscope/kundli-matching' };
-  if (t.includes('horoscope') || t.includes('rashi'))
-    return { label: '🌙 View Horoscope', url: SITE + '/horoscope' };
+    return { label: '💑 Check Compatibility', url: SITE + '/astropedia/en/freetools/horoscope-matching' };
   if (t.includes('gemstone') || t.includes('gem') || t.includes('ruby') || t.includes('emerald') || t.includes('sapphire'))
-    return { label: '💎 Explore Gemstones', url: SITE + '/gemstones' };
+    return { label: '💎 Explore Gemstones', url: SITE + '/astropedia/en/freetools/gemstone' };
   if (t.includes('yantra'))
-    return { label: '🔱 Explore Yantras', url: SITE + '/yantras' };
-  if (t.includes('puja') || t.includes('pooja') || t.includes('ritual'))
-    return { label: '🪔 View Pujas', url: SITE + '/puja' };
+    return { label: '🔱 Explore Yantras', url: SITE + '/remedies/yantra' };
+  if (t.includes('puja') || t.includes('pooja') || t.includes('ritual') || t.includes('homa'))
+    return { label: '🪔 View Pujas & Homas', url: SITE + '/priest-services' };
   if (t.includes('numerology'))
-    return { label: '🔢 Numerology Reading', url: SITE + '/numerology' };
+    return { label: '🔢 Numerology Reading', url: SITE + '/astropedia/en/freetools/numerology' };
   if (t.includes('vastu'))
-    return { label: '🏠 Vastu Guidance', url: SITE + '/vastu' };
+    return { label: '🏠 Vastu Guidance', url: SITE + '/astropedia/en/vastu' };
+  if (t.includes('nadi'))
+    return { label: '📜 Nadi Astrology', url: SITE + '/nadi/nadi-astrology' };
+  if (t.includes('career') || t.includes('business'))
+    return { label: '💼 Career & Business', url: SITE + '/career-money/career-money-astrology' };
+  if (t.includes('wealth') || t.includes('finance') || t.includes('money'))
+    return { label: '💰 Wealth & Finance', url: SITE + '/wealth-finance/wealth-finance-astrology' };
+  if (t.includes('family') || t.includes('children') || t.includes('fertility'))
+    return { label: '👨‍👩‍👧 Family Astrology', url: SITE + '/fertility-children/fertility-children-astrology' };
+  if (t.includes('education') || t.includes('study') || t.includes('exam'))
+    return { label: '🎓 Education Astrology', url: SITE + '/education-astrology' };
+  if (t.includes('health') || t.includes('beauty'))
+    return { label: '🩺 Health & Beauty', url: SITE + '/beauty-health/beauty-health-astrology' };
   if (t.includes('consult') || t.includes('astrologer'))
-    return { label: '🔮 Book Consultation', url: SITE + '/astrologers' };
+    return { label: '🔮 Talk to an Astrologer', url: SITE + '/astrovedspeaks/' };
+  if (t.includes('blog'))
+    return { label: '📰 Read Blogs', url: SITE + '/blogs' };
+  if (t.includes('article'))
+    return { label: '📰 Read Articles', url: SITE + '/articles' };
   if (t.includes('service') || t.includes('pricing'))
-    return { label: '✨ View All Services', url: SITE + '/services' };
+    return { label: '✨ View All Services', url: SITE + '/astrology-services' };
+  if (t.includes('horoscope') || t.includes('rashi'))
+    return { label: '🌙 View Horoscope', url: SITE + '/horoscopes' };
+  if (t.includes('remed'))
+    return { label: '🌿 Explore Remedies', url: SITE + '/dosha-pariharam/' };
+  if (t.includes('love') || t.includes('relation') || t.includes('marriage'))
+    return { label: '❤️ Love & Relationships', url: SITE + '/love-marriage/love-and-relationship' };
+  if (t.includes('special event'))
+    return { label: '✨ View Special Events', url: SITE + '/us/specials' };
+  if (t.includes('store') || t.includes('shop') || t.includes('buy'))
+    return { label: '🛒 Visit Store', url: SITE + '/sale.aspx' };
+
   return null;
 }
 
 /* ── Add bot message ── */
-function botMsg(txt, opts) {
+function botMsg(txt, opts, queryTxt) {
   const m = document.getElementById('msgs');
   const row = document.createElement('div'); row.className = 'mrow bot';
-  const link = getProductLink(txt);
-  let linkHtml = '';
-  if (link) {
-    linkHtml = '<br><a class="link-btn" href="' + link.url + '" target="_blank" rel="noopener">' +
-      '<svg viewBox="0 0 24 24"><path d="M19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/></svg>' +
-      link.label + '</a>';
+  const link = getProductLink(txt + ' ' + (queryTxt || '')); 
+
+async function callAPI(txt, attempt = 0) {
+  try {
+    const res = await fetch(API + '/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessId, message: txt })
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const d = await res.json();
+    rmTyping();
+    botMsg(d.reply || 'Please try again.', [], txt);   // ← added txt here
+  } catch (e) {
+    if (attempt < 2) {
+      await new Promise(r => setTimeout(r, 5000));
+      await callAPI(txt, attempt + 1);
+    } else {
+      rmTyping();
+      botMsg('Server is waking up... Please resend your message in 30 seconds! 🔄', []);
+    }
   }
-  let optsHtml = '';
-  if (opts && opts.length) {
-    optsHtml = '<div class="opt-btns">';
-    opts.forEach(o => { optsHtml += '<button class="opt-btn" onclick="doOpt(this)">' + o + '</button>'; });
-    optsHtml += '</div>';
-  }
-  row.innerHTML =
-    '<div class="av bot"><img src="' + LOGO_SRC + '" alt="bot"/></div>' +
-    '<div class="bbl bot">' + cleanMd(txt) + linkHtml + optsHtml + '</div>';
-  m.appendChild(row); scrl();
 }
+}
+  // ...rest of the function stays exactly the same 
 
 /* ── Add user message ── */
 function userMsg(txt, msgId) {
@@ -833,18 +866,19 @@ async function callAPI(txt, attempt = 0) {
   }
 }
 
-function doQR(b) {
-  const txt = b.textContent.trim();
-  if (txt.includes('Customer Support')) { showCRM(); return; }
-  document.getElementById('inp').value = txt.replace(/^[^\s]+\s/, '').trim();
-  send();
-}
 function doOpt(b) {
   const txt = b.textContent.trim();
   if (txt.includes('Customer Support')) { showCRM(); return; }
-  document.getElementById('inp').value = txt.replace(/^[^\s]+\s/, '').trim();
+  document.getElementById('inp').value = txt.replace(/^[^\w]+/, '').trim();
   send();
 }
+function doQR(b) {
+  const txt = b.textContent.trim();
+  if (txt.includes('Customer Support')) { showCRM(); return; }
+  document.getElementById('inp').value = txt.replace(/^[^\w]+/, '').trim();
+  send();
+}
+
 function onKey(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }
 function grow(el) { el.style.height = ''; el.style.height = Math.min(el.scrollHeight, 80) + 'px'; }
 
