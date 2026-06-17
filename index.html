@@ -740,34 +740,27 @@ function getProductLink(text) {
 }
 
 /* ── Add bot message ── */
-function botMsg(txt, opts, queryTxt) {
+function botMsg(txt, opts) {
   const m = document.getElementById('msgs');
   const row = document.createElement('div'); row.className = 'mrow bot';
-  const link = getProductLink(txt + ' ' + (queryTxt || '')); 
-
-async function callAPI(txt, attempt = 0) {
-  try {
-    const res = await fetch(API + '/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session_id: sessId, message: txt })
-    });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const d = await res.json();
-    rmTyping();
-    botMsg(d.reply || 'Please try again.', [], txt);   // ← added txt here
-  } catch (e) {
-    if (attempt < 2) {
-      await new Promise(r => setTimeout(r, 5000));
-      await callAPI(txt, attempt + 1);
-    } else {
-      rmTyping();
-      botMsg('Server is waking up... Please resend your message in 30 seconds! 🔄', []);
-    }
+  const link = getProductLink(txt);
+  let linkHtml = '';
+  if (link) {
+    linkHtml = '<br><a class="link-btn" href="' + link.url + '" target="_blank" rel="noopener">' +
+      '<svg viewBox="0 0 24 24"><path d="M19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/></svg>' +
+      link.label + '</a>';
   }
+  let optsHtml = '';
+  if (opts && opts.length) {
+    optsHtml = '<div class="opt-btns">';
+    opts.forEach(o => { optsHtml += '<button class="opt-btn" onclick="doOpt(this)">' + o + '</button>'; });
+    optsHtml += '</div>';
+  }
+  row.innerHTML =
+    '<div class="av bot"><img src="' + LOGO_SRC + '" alt="bot"/></div>' +
+    '<div class="bbl bot">' + cleanMd(txt) + linkHtml + optsHtml + '</div>';
+  m.appendChild(row); scrl();
 }
-}
-  // ...rest of the function stays exactly the same 
 
 /* ── Add user message ── */
 function userMsg(txt, msgId) {
@@ -866,19 +859,18 @@ async function callAPI(txt, attempt = 0) {
   }
 }
 
-function doOpt(b) {
-  const txt = b.textContent.trim();
-  if (txt.includes('Customer Support')) { showCRM(); return; }
-  document.getElementById('inp').value = txt.replace(/^[^\w]+/, '').trim();
-  send();
-}
 function doQR(b) {
   const txt = b.textContent.trim();
   if (txt.includes('Customer Support')) { showCRM(); return; }
-  document.getElementById('inp').value = txt.replace(/^[^\w]+/, '').trim();
+  document.getElementById('inp').value = txt.replace(/^[^\s]+\s/, '').trim();
   send();
 }
-
+function doOpt(b) {
+  const txt = b.textContent.trim();
+  if (txt.includes('Customer Support')) { showCRM(); return; }
+  document.getElementById('inp').value = txt.replace(/^[^\s]+\s/, '').trim();
+  send();
+}
 function onKey(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }
 function grow(el) { el.style.height = ''; el.style.height = Math.min(el.scrollHeight, 80) + 'px'; }
 
