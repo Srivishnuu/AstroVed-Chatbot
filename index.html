@@ -691,11 +691,15 @@ function cleanMd(t) {
 function getProductLink(text) {
   const t = text.toLowerCase();
 
+  // Horoscope/Moon-sign listing checked FIRST — "Gemini" contains "gem"
+  // and was wrongly triggering the Gemstone rule before this fix.
+  if (t.includes('horoscope') || t.includes('moon sign') || t.includes('rashi'))
+    return { label: '🌙 View Horoscope', url: SITE + '/horoscopes' };
   if (t.includes('birth chart') || t.includes('kundli') || t.includes('janam'))
     return { label: '📊 View Birth Chart', url: SITE + '/astropedia/en/freetools/birth-chart' };
-  if (t.includes('compatibility') || t.includes('match') || t.includes('kundali match'))
+  if (t.includes('compatibility') || t.includes('kundali match'))
     return { label: '💑 Check Compatibility', url: SITE + '/astropedia/en/freetools/horoscope-matching' };
-  if (t.includes('gemstone') || t.includes('gem') || t.includes('ruby') || t.includes('emerald') || t.includes('sapphire'))
+  if (t.includes('gemstone') || t.includes('ruby') || t.includes('emerald') || t.includes('sapphire'))
     return { label: '💎 Explore Gemstones', url: SITE + '/astropedia/en/freetools/gemstone' };
   if (t.includes('yantra'))
     return { label: '🔱 Explore Yantras', url: SITE + '/remedies/yantra' };
@@ -725,8 +729,6 @@ function getProductLink(text) {
     return { label: '📰 Read Articles', url: SITE + '/articles' };
   if (t.includes('service') || t.includes('pricing'))
     return { label: '✨ View All Services', url: SITE + '/astrology-services' };
-  if (t.includes('horoscope') || t.includes('rashi'))
-    return { label: '🌙 View Horoscope', url: SITE + '/horoscopes' };
   if (t.includes('remed'))
     return { label: '🌿 Explore Remedies', url: SITE + '/dosha-pariharam/' };
   if (t.includes('love') || t.includes('relation') || t.includes('marriage'))

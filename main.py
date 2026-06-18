@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from groq import Groq
 import sqlite3, os, asyncio, httpx, re, secrets, hashlib
@@ -78,6 +79,21 @@ RULES:
 - If website content has a relevant product/page URL, mention you can share the link
 - If no relevant website content given, answer using general Vedic astrology knowledge
 - Never refuse a question
+- Whenever you list the 12 zodiac/Moon signs, you MUST use the exact Tamil names below — never Sanskrit words like "Rashi: Mesha"
+
+ZODIAC SIGNS IN TAMIL (format: "EnglishName (ராசி: TamilName)"):
+1. Aries (ராசி: மேஷம்)
+2. Taurus (ராசி: ரிஷபம்)
+3. Gemini (ராசி: மிதுனம்)
+4. Cancer (ராசி: கடகம்)
+5. Leo (ராசி: சிம்மம்)
+6. Virgo (ராசி: கன்னி)
+7. Libra (ராசி: துலாம்)
+8. Scorpio (ராசி: விருச்சிகம்)
+9. Sagittarius (ராசி: தனுசு)
+10. Capricorn (ராசி: மகரம்)
+11. Aquarius (ராசி: கும்பம்)
+12. Pisces (ராசி: மீனம்)
 
 CONFIDENTIAL EXCEPTION:
 If payment/billing/refund/account details asked -> say exactly:
@@ -126,7 +142,7 @@ def init_db():
         )
     """)
 
-    # NEW: agent_sessions — tracks handoff status per chat session
+    # agent_sessions — tracks handoff status per chat session
     conn.execute("""
         CREATE TABLE IF NOT EXISTS agent_sessions (
             session_id    TEXT PRIMARY KEY,
@@ -142,7 +158,7 @@ def init_db():
         )
     """)
 
-    # NEW: agents — login table for support team members
+    # agents — login table for support team members
     conn.execute("""
         CREATE TABLE IF NOT EXISTS agents (
             id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -239,6 +255,12 @@ class AgentReplyRequest(BaseModel):
 class CloseSessionRequest(BaseModel):
     session_id: str
 
+class SessionStartRequest(BaseModel):
+    session_id: str
+    user_name: str = ""
+    user_email: str = ""
+    user_phone: str = ""
+
 # ── Chat endpoint ─────────────────────────────────────────────────────────────
 @app.post("/chat")
 async def chat(req: ChatRequest):
@@ -298,7 +320,7 @@ async def chat(req: ChatRequest):
 # ── Poll endpoint — frontend checks for agent replies ──────────────────────────
 @app.get("/poll/{session_id}")
 async def poll_session(session_id: str, since_id: int = 0):
-    """Frontend calls this every 3 seconds to check for new agent messages."""
+    """Frontend calls this every few seconds to check for new agent messages."""
     try:
         conn = sqlite3.connect("chat.db")
         rows = conn.execute(
@@ -355,6 +377,58 @@ async def handoff(req: HandoffRequest):
             f"Handoff requested: {req.issue_type} (priority: {req.priority})"
         )
         return {"status": "queued"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ── Session start — saves the lead form the moment it's submitted ──────────────
+@app.post("/session/start")
+async def session_start(req: SessionStartRequest):
+    """Called once right after the user submits the lead-capture form on the
+    widget — stores name/email/phone immediately, even before they send a
+    single chat message."""
+    try:
+        conn = sqlite3.connect("chat.db")
+        existing = conn.execute(
+            "SELECT session_id FROM agent_sessions WHERE session_id=?", (req.session_id,)
+        ).fetchone()
+        if existing:
+            conn.execute(
+                """UPDATE agent_sessions
+                   SET user_name=?, user_email=?, user_phone=?, updated_at=CURRENT_TIMESTAMP
+                   WHERE session_id=?""",
+                (req.user_name, req.user_email, req.user_phone, req.session_id)
+            )
+        else:
+            conn.execute(
+                """INSERT INTO agent_sessions
+                   (session_id, user_name, user_email, user_phone, status)
+                   VALUES (?,?,?,?, 'bot')""",
+                (req.session_id, req.user_name, req.user_email, req.user_phone)
+            )
+        conn.commit()
+        conn.close()
+        return {"status": "ok"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ── Admin: view every lead ever captured (any status) ───────────────────────────
+@app.get("/admin/users")
+async def admin_users():
+    """Quick way to check captured leads & chat status — open this URL in a browser."""
+    try:
+        conn = sqlite3.connect("chat.db")
+        rows = conn.execute(
+            """SELECT session_id, user_name, user_email, user_phone, status,
+                      issue_type, created_at, updated_at
+               FROM agent_sessions ORDER BY updated_at DESC"""
+        ).fetchall()
+        conn.close()
+        users = [
+            {"session_id": r[0], "user_name": r[1], "user_email": r[2], "user_phone": r[3],
+             "status": r[4], "issue_type": r[5], "created_at": r[6], "updated_at": r[7]}
+            for r in rows
+        ]
+        return {"users": users}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -463,6 +537,225 @@ async def agent_close(req: CloseSessionRequest):
         return {"status": "closed"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# ── Agent dashboard — live chat console for the CRM/support team ───────────────
+# Visit https://<your-render-url>/agent/dashboard in a browser.
+# Default logins: agent1 / astroved123  and  agent2 / astroved123
+# CHANGE THESE PASSWORDS before sharing this URL with your team.
+
+AGENT_DASHBOARD_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AstroVed Support Console</title>
+<style>
+:root{--bg:#0A0818;--panel:#161330;--border:rgba(201,168,76,.25);--gold:#C9A84C;
+--text:#EDE8D8;--muted:rgba(237,232,216,.55);--purple:#6C5CE7;--green:#22c55e;--red:#ef4444;}
+*{box-sizing:border-box;margin:0;padding:0;font-family:Arial,'DM Sans',sans-serif}
+body{background:var(--bg);color:var(--text);height:100vh;overflow:hidden}
+#login{display:flex;align-items:center;justify-content:center;height:100vh}
+.login-box{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:32px;width:320px}
+.login-box h2{color:var(--gold);margin-bottom:18px;font-size:18px;text-align:center}
+.login-box input{width:100%;padding:10px 12px;margin-bottom:12px;background:rgba(255,255,255,.06);
+border:1px solid var(--border);border-radius:8px;color:var(--text);outline:none;font-size:14px}
+.login-box button{width:100%;padding:10px;background:linear-gradient(135deg,var(--purple),var(--gold));
+border:none;border-radius:8px;color:#fff;font-weight:600;cursor:pointer;font-size:14px}
+#err{color:var(--red);font-size:12px;margin-top:8px;text-align:center;display:none}
+#app{display:none;height:100vh}
+#app.show{display:flex}
+#sidebar{width:320px;border-right:1px solid var(--border);overflow-y:auto;background:var(--panel);flex-shrink:0}
+#sidebar-hdr{padding:16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:var(--panel)}
+#sidebar-hdr span{color:var(--gold);font-weight:600;font-size:14px}
+#logout-btn{background:none;border:1px solid var(--border);color:var(--muted);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer}
+#sess-empty{padding:24px 16px;color:var(--muted);font-size:12px;text-align:center}
+.sess-item{padding:12px 16px;border-bottom:1px solid rgba(255,255,255,.05);cursor:pointer;transition:background .15s}
+.sess-item:hover{background:rgba(255,255,255,.04)}
+.sess-item.active{background:rgba(108,92,231,.18)}
+.sess-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;gap:8px}
+.sess-name{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.badge{font-size:10px;padding:2px 7px;border-radius:10px;text-transform:uppercase;letter-spacing:.03em;flex-shrink:0}
+.badge.waiting{background:rgba(239,68,68,.2);color:#fca5a5}
+.badge.with_agent{background:rgba(34,197,94,.2);color:#86efac}
+.sess-sub{font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#main{flex:1;display:flex;flex-direction:column;min-width:0}
+#chat-hdr{padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-shrink:0}
+#chat-hdr h3{font-size:14px;color:var(--gold)}
+#chat-hdr .sub{font-size:11px;color:var(--muted);margin-top:2px}
+.hdr-btns button{margin-left:8px;padding:6px 14px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,.05);color:var(--text);font-size:12px;cursor:pointer}
+.hdr-btns button.claim{border-color:rgba(34,197,94,.5);color:#86efac}
+.hdr-btns button.close{border-color:rgba(239,68,68,.5);color:#fca5a5}
+#chat-body{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:8px}
+.msg{max-width:70%;padding:9px 13px;border-radius:12px;font-size:13px;line-height:1.5;white-space:pre-wrap}
+.msg.user{align-self:flex-start;background:rgba(255,255,255,.07)}
+.msg.assistant{align-self:flex-end;background:linear-gradient(135deg,var(--purple),#4a3580)}
+.msg.system{align-self:center;background:none;color:var(--muted);font-size:11px;font-style:italic;max-width:100%}
+#reply-bar{padding:14px;border-top:1px solid var(--border);display:flex;gap:8px;flex-shrink:0}
+#reply-input{flex:1;padding:10px 14px;border-radius:20px;border:1px solid var(--border);background:rgba(255,255,255,.06);color:var(--text);outline:none;font-size:13px}
+#reply-send{padding:10px 20px;border-radius:20px;border:none;background:linear-gradient(135deg,var(--purple),var(--gold));color:#fff;font-weight:600;cursor:pointer}
+#empty-state{flex:1;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:13px}
+</style>
+</head>
+<body>
+
+<div id="login">
+  <div class="login-box">
+    <h2>✦ AstroVed Support Console</h2>
+    <input id="luser" placeholder="Username" autocomplete="username">
+    <input id="lpass" type="password" placeholder="Password" autocomplete="current-password">
+    <button onclick="doLogin()">Log In</button>
+    <div id="err"></div>
+  </div>
+</div>
+
+<div id="app">
+  <div id="sidebar">
+    <div id="sidebar-hdr">
+      <span id="agent-name"></span>
+      <button id="logout-btn" onclick="logout()">Log out</button>
+    </div>
+    <div id="sess-list"></div>
+  </div>
+  <div id="main">
+    <div id="empty-state">Select a conversation from the left</div>
+  </div>
+</div>
+
+<script>
+const API = window.location.origin;
+let agentName = '', activeSession = null, pollHist = null, pollList = null;
+
+function doLogin() {
+  const u = document.getElementById('luser').value.trim();
+  const p = document.getElementById('lpass').value.trim();
+  if (!u || !p) return;
+  fetch(API + '/agent/login', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({username:u, password:p})
+  }).then(r => { if (!r.ok) throw new Error(); return r.json(); })
+    .then(d => {
+      agentName = d.display_name;
+      sessionStorage.setItem('agentName', agentName);
+      enterApp();
+    })
+    .catch(() => {
+      document.getElementById('err').textContent = 'Invalid username or password';
+      document.getElementById('err').style.display = 'block';
+    });
+}
+
+function enterApp() {
+  document.getElementById('login').style.display = 'none';
+  document.getElementById('app').classList.add('show');
+  document.getElementById('agent-name').textContent = '👤 ' + agentName;
+  loadSessions();
+  pollList = setInterval(loadSessions, 5000);
+}
+
+function logout() {
+  sessionStorage.clear();
+  clearInterval(pollList); clearInterval(pollHist);
+  location.reload();
+}
+
+(function tryAutoLogin() {
+  const saved = sessionStorage.getItem('agentName');
+  if (saved) { agentName = saved; enterApp(); }
+})();
+
+function loadSessions() {
+  fetch(API + '/agent/sessions').then(r => r.json()).then(d => {
+    const list = document.getElementById('sess-list');
+    if (!d.sessions.length) {
+      list.innerHTML = '<div id="sess-empty">No chats waiting right now ✨</div>';
+      return;
+    }
+    list.innerHTML = '';
+    d.sessions.forEach(s => {
+      const div = document.createElement('div');
+      div.className = 'sess-item' + (s.session_id === activeSession ? ' active' : '');
+      div.onclick = () => openSession(s.session_id, s.user_name, s.user_email, s.user_phone);
+      const who = s.user_name || 'Anonymous visitor';
+      const badgeTxt = s.status === 'waiting' ? 'Waiting' : (s.assigned_agent || 'Agent');
+      div.innerHTML =
+        '<div class="sess-top"><span class="sess-name">' + who + '</span>' +
+        '<span class="badge ' + s.status + '">' + badgeTxt + '</span></div>' +
+        '<div class="sess-sub">' + (s.user_email || s.user_phone || s.session_id.slice(0,16)) + ' · ' + (s.issue_type || 'general') + '</div>';
+      list.appendChild(div);
+    });
+  }).catch(()=>{});
+}
+
+function openSession(sid, name, email, phone) {
+  activeSession = sid;
+  loadSessions();
+  document.getElementById('main').innerHTML =
+    '<div id="chat-hdr"><div><h3>' + (name || 'Anonymous visitor') + '</h3>' +
+    '<div class="sub">' + (email || '') + (phone ? ' · ' + phone : '') + '</div></div>' +
+    '<div class="hdr-btns">' +
+    '<button class="claim" onclick="claimSession()">Claim chat</button>' +
+    '<button class="close" onclick="closeSession()">End &amp; return to bot</button>' +
+    '</div></div>' +
+    '<div id="chat-body"></div>' +
+    '<div id="reply-bar">' +
+    '<input id="reply-input" placeholder="Type your reply…" onkeydown="if(event.key===\\'Enter\\')sendReply()">' +
+    '<button id="reply-send" onclick="sendReply()">Send</button>' +
+    '</div>';
+  loadHistory();
+  clearInterval(pollHist);
+  pollHist = setInterval(loadHistory, 4000);
+}
+
+function loadHistory() {
+  if (!activeSession) return;
+  fetch(API + '/agent/history/' + activeSession).then(r => r.json()).then(d => {
+    const body = document.getElementById('chat-body');
+    if (!body) return;
+    const wasAtBottom = body.scrollTop + body.clientHeight >= body.scrollHeight - 30;
+    body.innerHTML = d.messages.map(m =>
+      '<div class="msg ' + m.role + '">' + (m.content || '').replace(/</g,'&lt;') + '</div>'
+    ).join('');
+    if (wasAtBottom) body.scrollTop = body.scrollHeight;
+  }).catch(()=>{});
+}
+
+function claimSession() {
+  if (!activeSession) return;
+  fetch(API + '/agent/claim/' + activeSession + '?agent_name=' + encodeURIComponent(agentName), {method:'POST'})
+    .then(() => { loadHistory(); loadSessions(); });
+}
+
+function closeSession() {
+  if (!activeSession) return;
+  fetch(API + '/agent/close', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({session_id: activeSession})
+  }).then(() => {
+    activeSession = null;
+    clearInterval(pollHist);
+    document.getElementById('main').innerHTML = '<div id="empty-state">Select a conversation from the left</div>';
+    loadSessions();
+  });
+}
+
+function sendReply() {
+  const inp = document.getElementById('reply-input');
+  const msg = inp.value.trim();
+  if (!msg || !activeSession) return;
+  inp.value = '';
+  fetch(API + '/agent/reply', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({session_id: activeSession, agent_name: agentName, message: msg})
+  }).then(loadHistory);
+}
+</script>
+</body>
+</html>"""
+
+@app.get("/agent/dashboard", response_class=HTMLResponse)
+async def agent_dashboard_page():
+    return AGENT_DASHBOARD_HTML
+
 
 # ── Health check ──────────────────────────────────────────────────────────────
 @app.get("/")
