@@ -261,6 +261,51 @@ class SessionStartRequest(BaseModel):
     user_email: str = ""
     user_phone: str = ""
 
+@app.post("/session/start")
+async def session_start(req: SessionStartRequest):
+    """Called once right after the form is submitted — saves the lead
+    immediately, even before the user types a single message."""
+    try:
+        conn = sqlite3.connect("chat.db")
+        existing = conn.execute(
+            "SELECT session_id FROM agent_sessions WHERE session_id=?", (req.session_id,)
+        ).fetchone()
+        if existing:
+            conn.execute(
+                """UPDATE agent_sessions
+                   SET user_name=?, user_email=?, user_phone=?, updated_at=CURRENT_TIMESTAMP
+                   WHERE session_id=?""",
+                (req.user_name, req.user_email, req.user_phone, req.session_id)
+            )
+        else:
+            conn.execute(
+                """INSERT INTO agent_sessions
+                   (session_id, user_name, user_email, user_phone, status)
+                   VALUES (?,?,?,?, 'bot')""",
+                (req.session_id, req.user_name, req.user_email, req.user_phone)
+            )
+        conn.commit()
+        conn.close()
+        return {"status": "ok"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/admin/users")
+async def admin_users():
+    """Quick way to check captured leads — visit this URL in a browser."""
+    conn = sqlite3.connect("chat.db")
+    rows = conn.execute(
+        """SELECT session_id, user_name, user_email, user_phone, status,
+                  issue_type, created_at, updated_at
+           FROM agent_sessions ORDER BY updated_at DESC"""
+    ).fetchall()
+    conn.close()
+    return {"users": [
+        {"session_id": r[0], "user_name": r[1], "user_email": r[2], "user_phone": r[3],
+         "status": r[4], "issue_type": r[5], "created_at": r[6], "updated_at": r[7]}
+        for r in rows
+    ]}
+
 # ── Chat endpoint ─────────────────────────────────────────────────────────────
 @app.post("/chat")
 async def chat(req: ChatRequest):
@@ -718,6 +763,14 @@ function loadHistory() {
     if (wasAtBottom) body.scrollTop = body.scrollHeight;
   }).catch(()=>{});
 }
+
+uName = n.split(' ')[0]; uEmail = e; uPhone = document.getElementById('fcc').value + ' ' + p;
+
+fetch(API + '/session/start', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ session_id: sessId, user_name: n, user_email: e, user_phone: uPhone })
+}).catch(() => {});
 
 function claimSession() {
   if (!activeSession) return;
