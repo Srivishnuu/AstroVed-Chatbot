@@ -1,0 +1,59 @@
+name: Daily Knowledge Base Scrape
+
+# Runs scraper.py every day automatically, and commits the updated
+# knowledge_base.txt back to the repo. Since Render has "Auto-Deploy on
+# push" enabled, this commit alone triggers a fresh deploy with the new
+# content — no manual steps needed after setup.
+
+on:
+  schedule:
+    # Runs at 3:00 AM IST every day.
+    # GitHub Actions cron is in UTC, so 3:00 AM IST = 21:30 UTC (previous day).
+    - cron: '30 21 * * *'
+
+  # Lets you manually trigger a scrape anytime from the GitHub Actions tab
+  # (Repo -> Actions -> Daily Knowledge Base Scrape -> Run workflow)
+  workflow_dispatch: {}
+
+# Needed so the workflow is allowed to push the updated file back to the repo.
+permissions:
+  contents: write
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests beautifulsoup4 lxml
+
+      - name: Run scraper
+        run: python scraper.py
+
+      - name: Commit and push if knowledge_base.txt changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Only commit if the scrape actually produced a change.
+          # Avoids empty/noisy commits when the site content hasn't moved.
+          if git diff --quiet -- knowledge_base.txt all_urls.txt; then
+            echo "No changes in knowledge_base.txt or all_urls.txt — skipping commit."
+          else
+            git add knowledge_base.txt all_urls.txt
+            git commit -m "chore: auto-update knowledge base [skip ci] ($(date -u +'%Y-%m-%d %H:%M UTC'))"
+            git push
+          fi
