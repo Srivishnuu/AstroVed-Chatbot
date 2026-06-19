@@ -6,3 +6,5 @@ httpx
 requests
 beautifulsoup4
 lxml
+pymysql
+DBUtils

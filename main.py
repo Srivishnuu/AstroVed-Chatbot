@@ -3,10 +3,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from groq import Groq
-import sqlite3, os, asyncio, httpx, re, secrets, hashlib
+import os, asyncio, httpx, re, hashlib
 from contextlib import asynccontextmanager
-from datetime import datetime
 from dotenv import load_dotenv
+import pymysql
+from pymysql.cursors import DictCursor
+from dbutils.pooled_db import PooledDB
 
 load_dotenv()
 
@@ -16,6 +18,41 @@ if not GROQ_API_KEY:
     raise RuntimeError("GROQ_API_KEY not found in .env file!")
 
 SITE = "https://www.astroved.com"
+
+# ── MySQL connection pool (cloud-safe: pings + reconnects automatically) ───────
+DB_HOST = os.getenv("DB_HOST")
+DB_PORT = int(os.getenv("DB_PORT", "3306"))
+DB_USER = os.getenv("DB_USER")
+DB_PASSWORD = os.getenv("DB_PASSWORD")
+DB_NAME = os.getenv("DB_NAME")
+DB_SSL = os.getenv("DB_SSL", "true").lower() == "true"  # most cloud MySQL (PlanetScale/Railway/AWS) need SSL
+
+if not all([DB_HOST, DB_USER, DB_PASSWORD, DB_NAME]):
+    raise RuntimeError("MySQL DB_HOST/DB_USER/DB_PASSWORD/DB_NAME not found in .env file!")
+
+_pool_kwargs = dict(
+    creator=pymysql,
+    host=DB_HOST,
+    port=DB_PORT,
+    user=DB_USER,
+    password=DB_PASSWORD,
+    database=DB_NAME,
+    charset="utf8mb4",
+    cursorclass=DictCursor,
+    autocommit=True,
+    maxconnections=10,
+    blocking=True,
+    ping=1,            # PooledDB: ping connection before use, reconnect if dead (important for cloud DBs)
+)
+if DB_SSL:
+    # Most managed MySQL providers require SSL; empty dict enables it with default certs.
+    _pool_kwargs["ssl"] = {"ssl": {}}
+
+POOL = PooledDB(**_pool_kwargs)
+
+def get_conn():
+    """Get a pooled MySQL connection. Always close() it (returns to pool, doesn't actually disconnect)."""
+    return POOL.connection()
 
 # ── Handoff trigger keywords ───────────────────────────────────────────────────
 HANDOFF_KEYWORDS = [
@@ -30,16 +67,6 @@ def needs_handoff(text: str) -> bool:
     return any(k in t for k in HANDOFF_KEYWORDS)
 
 # ── TOPIC MAP ───────────────────────────────────────────────────────────────
-# Single source of truth: topic -> matching keywords (checked against the
-# USER's message, not the bot's reply), the destination page, and a
-# guaranteed fallback 3-4 line description used if knowledge_base.txt has
-# no/weak content for that page (e.g. scraper missed it or site copy changed).
-#
-# IMPORTANT: order matters. More specific keys should be listed BEFORE
-# broader ones if there's any chance of substring overlap (e.g. "horoscope"
-# vs "horoscope matching" vs "moon sign" -- see match_topic() below which
-# checks all candidates and picks the LONGEST keyword match, so order in
-# the dict itself is not load-bearing, but keep it human-readable by intent.
 TOPIC_MAP = {
     "nadi": {
         "keywords": ["nadi", "nadi astrology", "nadi leaf", "palm leaf", "bhrigu nadi"],
@@ -232,9 +259,6 @@ TOPIC_MAP = {
 }
 
 def match_topic(user_text: str):
-    """Find the best-matching topic for the USER's message (not the bot's
-    reply). Picks the topic whose matched keyword is the longest (most
-    specific), so e.g. 'horoscope matching' beats plain 'horoscope'."""
     t = user_text.lower()
     best = None
     best_len = 0
@@ -287,8 +311,6 @@ def search_knowledge(query: str, top_k: int = 3):
     return result
 
 def search_knowledge_for_url(url_fragment: str, top_k: int = 2):
-    """Specifically pull KB chunks whose URL matches a known topic page,
-    e.g. '/nadi/' -- used to force on-topic content once a topic is matched."""
     if not KB_CHUNKS:
         return ""
     matches = [c for c in KB_CHUNKS if url_fragment in c["url"].lower()]
@@ -308,10 +330,10 @@ RULES:
 - After selection -> explain in 3-4 lines only
 - Be warm, mystical, helpful always
 - NEVER write out any URL or link in your reply text (no "https://", no "astroved.com/..."). 
-  If a link is relevant, just say "you can check this out below" — the app shows a button automatically. 
+  If a link is relevant, just say a link is available below — the app shows a button automatically. 
   Do NOT type, guess, or invent any link yourself, even if it looks plausible.
 - Never refuse a question
-...
+- Whenever you list the 12 zodiac/Moon signs, you MUST use the exact Tamil names below — never Sanskrit words like "Rashi: Mesha"
 
 ZODIAC SIGNS IN TAMIL (format: "EnglishName (ராசி: TamilName)"):
 1. Aries (ராசி: மேஷம்)
@@ -330,9 +352,6 @@ ZODIAC SIGNS IN TAMIL (format: "EnglishName (ராசி: TamilName)"):
 CONFIDENTIAL EXCEPTION:
 If payment/billing/refund/account details asked -> say exactly:
 'Let me connect you with our specialist team.' and stop."""
-
-
-...
 
 TOPIC_FORCE_INSTRUCTION = """
 
@@ -373,98 +392,116 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── SQLite setup — ALL tables ──────────────────────────────────────────────────
+# ── MySQL schema setup — ALL tables ─────────────────────────────────────────────
 def init_db():
-    conn = sqlite3.connect("chat.db")
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
 
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS messages (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            session_id TEXT,
-            role       TEXT,
-            content    TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS messages (
+                id         INT AUTO_INCREMENT PRIMARY KEY,
+                session_id VARCHAR(64),
+                role       VARCHAR(16),
+                content    TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_session (session_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        """)
 
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS agent_sessions (
-            session_id    TEXT PRIMARY KEY,
-            user_name     TEXT,
-            user_email    TEXT,
-            user_phone    TEXT,
-            status        TEXT DEFAULT 'bot',
-            assigned_agent TEXT,
-            issue_type    TEXT,
-            priority      TEXT DEFAULT 'normal',
-            created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS agent_sessions (
+                session_id    VARCHAR(64) PRIMARY KEY,
+                user_name     VARCHAR(255),
+                user_email    VARCHAR(255),
+                user_phone    VARCHAR(64),
+                status        VARCHAR(32) DEFAULT 'bot',
+                assigned_agent VARCHAR(255),
+                issue_type    VARCHAR(64),
+                priority      VARCHAR(32) DEFAULT 'normal',
+                created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        """)
 
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS agents (
-            id            INTEGER PRIMARY KEY AUTOINCREMENT,
-            username      TEXT UNIQUE,
-            password_hash TEXT,
-            display_name  TEXT,
-            created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS agents (
+                id            INT AUTO_INCREMENT PRIMARY KEY,
+                username      VARCHAR(255) UNIQUE,
+                password_hash VARCHAR(255),
+                display_name  VARCHAR(255),
+                created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        """)
 
-    conn.commit()
-    conn.close()
+        conn.commit()
+        cur.close()
+    finally:
+        conn.close()
 
 def get_history(session_id: str):
+    conn = get_conn()
     try:
-        conn = sqlite3.connect("chat.db")
-        rows = conn.execute(
+        cur = conn.cursor()
+        cur.execute(
             """SELECT role, content FROM messages
-               WHERE session_id=? AND role IN ('user', 'assistant')
+               WHERE session_id=%s AND role IN ('user', 'assistant')
                ORDER BY created_at DESC LIMIT 20""",
             (session_id,)
-        ).fetchall()
-        conn.close()
+        )
+        rows = cur.fetchall()
+        cur.close()
         history = []
-        for r, c in reversed(rows):
-            if r in ("user", "assistant") and c and str(c).strip():
-                history.append({"role": r, "content": str(c).strip()})
+        for r in reversed(rows):
+            role, content = r["role"], r["content"]
+            if role in ("user", "assistant") and content and str(content).strip():
+                history.append({"role": role, "content": str(content).strip()})
         return history
     except Exception as e:
         print(f"get_history error: {e}")
         return []
+    finally:
+        conn.close()
 
 def save_message(session_id: str, role: str, content: str):
+    conn = get_conn()
     try:
-        conn = sqlite3.connect("chat.db")
-        conn.execute(
-            "INSERT INTO messages (session_id, role, content) VALUES (?,?,?)",
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO messages (session_id, role, content) VALUES (%s,%s,%s)",
             (session_id, role, content)
         )
         conn.commit()
-        conn.close()
+        cur.close()
     except Exception as e:
         print(f"save_message error: {e}")
+    finally:
+        conn.close()
 
 def hash_password(pw: str) -> str:
     return hashlib.sha256(pw.encode()).hexdigest()
 
 def seed_default_agents():
-    conn = sqlite3.connect("chat.db")
-    count = conn.execute("SELECT COUNT(*) FROM agents").fetchone()[0]
-    if count == 0:
-        default_agents = [
-            ("agent1", "astroved123", "Support Agent 1"),
-            ("agent2", "astroved123", "Support Agent 2"),
-        ]
-        for username, pw, name in default_agents:
-            conn.execute(
-                "INSERT INTO agents (username, password_hash, display_name) VALUES (?,?,?)",
-                (username, hash_password(pw), name)
-            )
-        conn.commit()
-        print("Seeded default agent accounts (CHANGE PASSWORDS IN PRODUCTION!)")
-    conn.close()
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) AS c FROM agents")
+        count = cur.fetchone()["c"]
+        if count == 0:
+            default_agents = [
+                ("agent1", "astroved123", "Support Agent 1"),
+                ("agent2", "astroved123", "Support Agent 2"),
+            ]
+            for username, pw, name in default_agents:
+                cur.execute(
+                    "INSERT INTO agents (username, password_hash, display_name) VALUES (%s,%s,%s)",
+                    (username, hash_password(pw), name)
+                )
+            conn.commit()
+            print("Seeded default agent accounts (CHANGE PASSWORDS IN PRODUCTION!)")
+        cur.close()
+    finally:
+        conn.close()
 
 init_db()
 seed_default_agents()
@@ -505,58 +542,68 @@ class SessionStartRequest(BaseModel):
 
 @app.post("/session/start")
 async def session_start(req: SessionStartRequest):
+    conn = get_conn()
     try:
-        conn = sqlite3.connect("chat.db")
-        existing = conn.execute(
-            "SELECT session_id FROM agent_sessions WHERE session_id=?", (req.session_id,)
-        ).fetchone()
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT session_id FROM agent_sessions WHERE session_id=%s", (req.session_id,)
+        )
+        existing = cur.fetchone()
         if existing:
-            conn.execute(
+            cur.execute(
                 """UPDATE agent_sessions
-                   SET user_name=?, user_email=?, user_phone=?, updated_at=CURRENT_TIMESTAMP
-                   WHERE session_id=?""",
+                   SET user_name=%s, user_email=%s, user_phone=%s
+                   WHERE session_id=%s""",
                 (req.user_name, req.user_email, req.user_phone, req.session_id)
             )
         else:
-            conn.execute(
+            cur.execute(
                 """INSERT INTO agent_sessions
                    (session_id, user_name, user_email, user_phone, status)
-                   VALUES (?,?,?,?, 'bot')""",
+                   VALUES (%s,%s,%s,%s, 'bot')""",
                 (req.session_id, req.user_name, req.user_email, req.user_phone)
             )
         conn.commit()
-        conn.close()
+        cur.close()
         return {"status": "ok"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
 
 @app.get("/admin/users")
 async def admin_users():
-    conn = sqlite3.connect("chat.db")
-    rows = conn.execute(
-        """SELECT session_id, user_name, user_email, user_phone, status,
-                  issue_type, created_at, updated_at
-           FROM agent_sessions ORDER BY updated_at DESC"""
-    ).fetchall()
-    conn.close()
-    return {"users": [
-        {"session_id": r[0], "user_name": r[1], "user_email": r[2], "user_phone": r[3],
-         "status": r[4], "issue_type": r[5], "created_at": r[6], "updated_at": r[7]}
-        for r in rows
-    ]}
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """SELECT session_id, user_name, user_email, user_phone, status,
+                      issue_type, created_at, updated_at
+               FROM agent_sessions ORDER BY updated_at DESC"""
+        )
+        rows = cur.fetchall()
+        cur.close()
+        return {"users": rows}
+    finally:
+        conn.close()
 
 # ── Chat endpoint ─────────────────────────────────────────────────────────────
 @app.post("/chat")
 async def chat(req: ChatRequest):
     try:
-        conn = sqlite3.connect("chat.db")
-        row = conn.execute(
-            "SELECT status FROM agent_sessions WHERE session_id=?",
-            (req.session_id,)
-        ).fetchone()
-        conn.close()
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT status FROM agent_sessions WHERE session_id=%s",
+                (req.session_id,)
+            )
+            row = cur.fetchone()
+            cur.close()
+        finally:
+            conn.close()
 
-        if row and row[0] == "with_agent":
+        if row and row["status"] == "with_agent":
             save_message(req.session_id, "user", req.message)
             return {"reply": None, "mode": "with_agent"}
 
@@ -580,15 +627,11 @@ async def chat(req: ChatRequest):
         system_content = BASE_SYSTEM_PROMPT
 
         if topic_info:
-            # Try to pull real scraped content for that page first
             url_fragment = topic_info["url"].replace(SITE, "").strip("/").split("/")[0]
             kb_content = search_knowledge_for_url(url_fragment)
             if not kb_content:
-                # Fall back to general keyword search
                 kb_content = search_knowledge(req.message, top_k=2)
             if not kb_content:
-                # Last resort: guaranteed fallback description so the bot
-                # NEVER goes off-topic or says nothing useful
                 kb_content = f"[Page: {topic_info['label']}]\nURL: {topic_info['url']}\n{topic_info['fallback']}\n"
 
             system_content += TOPIC_FORCE_INSTRUCTION.format(
@@ -615,8 +658,6 @@ async def chat(req: ChatRequest):
         reply = response.choices[0].message.content
         save_message(req.session_id, "assistant", reply)
 
-        # Return the topic URL EXPLICITLY — frontend no longer needs to
-        # guess the link by scanning the bot's reply text for keywords.
         return {
             "reply": reply,
             "mode": "bot",
@@ -631,49 +672,60 @@ async def chat(req: ChatRequest):
 # ── Poll endpoint — frontend checks for agent replies ──────────────────────────
 @app.get("/poll/{session_id}")
 async def poll_session(session_id: str, since_id: int = 0):
+    conn = get_conn()
     try:
-        conn = sqlite3.connect("chat.db")
-        rows = conn.execute(
+        cur = conn.cursor()
+        cur.execute(
             """SELECT id, role, content FROM messages
-               WHERE session_id=? AND id > ?
+               WHERE session_id=%s AND id > %s
                ORDER BY id ASC""",
             (session_id, since_id)
-        ).fetchall()
-        status_row = conn.execute(
-            "SELECT status, assigned_agent FROM agent_sessions WHERE session_id=?",
-            (session_id,)
-        ).fetchone()
-        conn.close()
+        )
+        rows = cur.fetchall()
 
-        new_messages = [{"id": r[0], "role": r[1], "content": r[2]} for r in rows]
-        status = status_row[0] if status_row else "bot"
-        agent = status_row[1] if status_row else None
+        cur.execute(
+            "SELECT status, assigned_agent FROM agent_sessions WHERE session_id=%s",
+            (session_id,)
+        )
+        status_row = cur.fetchone()
+        cur.close()
+
+        new_messages = [{"id": r["id"], "role": r["role"], "content": r["content"]} for r in rows]
+        status = status_row["status"] if status_row else "bot"
+        agent = status_row["assigned_agent"] if status_row else None
 
         return {"messages": new_messages, "status": status, "agent_name": agent}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
 
 # ── Handoff endpoint ────────────────────────────────────────────────────────────
 def create_or_update_handoff(session_id, name, email, phone, issue_type, priority):
-    conn = sqlite3.connect("chat.db")
-    existing = conn.execute(
-        "SELECT session_id FROM agent_sessions WHERE session_id=?", (session_id,)
-    ).fetchone()
-    if existing:
-        conn.execute(
-            """UPDATE agent_sessions SET status='waiting', issue_type=?, priority=?,
-               updated_at=CURRENT_TIMESTAMP WHERE session_id=?""",
-            (issue_type, priority, session_id)
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT session_id FROM agent_sessions WHERE session_id=%s", (session_id,)
         )
-    else:
-        conn.execute(
-            """INSERT INTO agent_sessions
-               (session_id, user_name, user_email, user_phone, status, issue_type, priority)
-               VALUES (?,?,?,?,'waiting',?,?)""",
-            (session_id, name, email, phone, issue_type, priority)
-        )
-    conn.commit()
-    conn.close()
+        existing = cur.fetchone()
+        if existing:
+            cur.execute(
+                """UPDATE agent_sessions SET status='waiting', issue_type=%s, priority=%s
+                   WHERE session_id=%s""",
+                (issue_type, priority, session_id)
+            )
+        else:
+            cur.execute(
+                """INSERT INTO agent_sessions
+                   (session_id, user_name, user_email, user_phone, status, issue_type, priority)
+                   VALUES (%s,%s,%s,%s,'waiting',%s,%s)""",
+                (session_id, name, email, phone, issue_type, priority)
+            )
+        conn.commit()
+        cur.close()
+    finally:
+        conn.close()
 
 @app.post("/handoff")
 async def handoff(req: HandoffRequest):
@@ -693,27 +745,32 @@ async def handoff(req: HandoffRequest):
 # ── Agent login ──────────────────────────────────────────────────────────────
 @app.post("/agent/login")
 async def agent_login(req: AgentLoginRequest):
+    conn = get_conn()
     try:
-        conn = sqlite3.connect("chat.db")
-        row = conn.execute(
-            "SELECT display_name, password_hash FROM agents WHERE username=?",
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT display_name, password_hash FROM agents WHERE username=%s",
             (req.username,)
-        ).fetchone()
-        conn.close()
-        if not row or row[1] != hash_password(req.password):
+        )
+        row = cur.fetchone()
+        cur.close()
+        if not row or row["password_hash"] != hash_password(req.password):
             raise HTTPException(status_code=401, detail="Invalid username or password")
-        return {"status": "ok", "display_name": row[0], "username": req.username}
+        return {"status": "ok", "display_name": row["display_name"], "username": req.username}
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
 
 # ── Agent: list sessions waiting / active ──────────────────────────────────────
 @app.get("/agent/sessions")
 async def agent_sessions():
+    conn = get_conn()
     try:
-        conn = sqlite3.connect("chat.db")
-        rows = conn.execute(
+        cur = conn.cursor()
+        cur.execute(
             """SELECT session_id, user_name, user_email, user_phone,
                       status, assigned_agent, issue_type, priority, updated_at
                FROM agent_sessions
@@ -721,80 +778,89 @@ async def agent_sessions():
                ORDER BY
                  CASE priority WHEN 'urgent' THEN 0 ELSE 1 END,
                  updated_at ASC"""
-        ).fetchall()
-        conn.close()
-        sessions = []
-        for r in rows:
-            sessions.append({
-                "session_id": r[0], "user_name": r[1], "user_email": r[2],
-                "user_phone": r[3], "status": r[4], "assigned_agent": r[5],
-                "issue_type": r[6], "priority": r[7], "updated_at": r[8]
-            })
-        return {"sessions": sessions}
+        )
+        rows = cur.fetchall()
+        cur.close()
+        return {"sessions": rows}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
 
 # ── Agent: get full chat history for a session ─────────────────────────────────
 @app.get("/agent/history/{session_id}")
 async def agent_history(session_id: str):
+    conn = get_conn()
     try:
-        conn = sqlite3.connect("chat.db")
-        rows = conn.execute(
-            "SELECT id, role, content, created_at FROM messages WHERE session_id=? ORDER BY id ASC",
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT id, role, content, created_at AS time FROM messages WHERE session_id=%s ORDER BY id ASC",
             (session_id,)
-        ).fetchall()
-        conn.close()
-        return {"messages": [{"id": r[0], "role": r[1], "content": r[2], "time": r[3]} for r in rows]}
+        )
+        rows = cur.fetchall()
+        cur.close()
+        return {"messages": rows}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
 
 # ── Agent: accept/claim a session ───────────────────────────────────────────────
 @app.post("/agent/claim/{session_id}")
 async def agent_claim(session_id: str, agent_name: str):
+    conn = get_conn()
     try:
-        conn = sqlite3.connect("chat.db")
-        conn.execute(
-            "UPDATE agent_sessions SET status='with_agent', assigned_agent=?, updated_at=CURRENT_TIMESTAMP WHERE session_id=?",
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE agent_sessions SET status='with_agent', assigned_agent=%s WHERE session_id=%s",
             (agent_name, session_id)
         )
         conn.commit()
-        conn.close()
+        cur.close()
         save_message(session_id, "system", f"{agent_name} has joined the chat")
         return {"status": "claimed"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
 
 # ── Agent: send reply ────────────────────────────────────────────────────────────
 @app.post("/agent/reply")
 async def agent_reply(req: AgentReplyRequest):
+    conn = get_conn()
     try:
         save_message(req.session_id, "assistant", req.message)
-        conn = sqlite3.connect("chat.db")
-        conn.execute(
-            "UPDATE agent_sessions SET updated_at=CURRENT_TIMESTAMP WHERE session_id=?",
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE agent_sessions SET updated_at=CURRENT_TIMESTAMP WHERE session_id=%s",
             (req.session_id,)
         )
         conn.commit()
-        conn.close()
+        cur.close()
         return {"status": "sent"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
 
 # ── Agent: close session (hand back to bot) ─────────────────────────────────────
 @app.post("/agent/close")
 async def agent_close(req: CloseSessionRequest):
+    conn = get_conn()
     try:
-        conn = sqlite3.connect("chat.db")
-        conn.execute(
-            "UPDATE agent_sessions SET status='closed', updated_at=CURRENT_TIMESTAMP WHERE session_id=?",
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE agent_sessions SET status='closed' WHERE session_id=%s",
             (req.session_id,)
         )
         conn.commit()
-        conn.close()
+        cur.close()
         save_message(req.session_id, "system", "Agent has ended this conversation")
         return {"status": "closed"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
 
 # ── Agent dashboard — live chat console for the CRM/support team ───────────────
 AGENT_DASHBOARD_HTML = """<!DOCTYPE html>
@@ -1014,10 +1080,19 @@ async def agent_dashboard_page():
 # ── Health check ──────────────────────────────────────────────────────────────
 @app.get("/")
 def root():
+    db_ok = True
+    try:
+        conn = get_conn()
+        conn.cursor().execute("SELECT 1")
+        conn.close()
+    except Exception:
+        db_ok = False
     return {
         "status": "AstroVed.AI is online",
         "model": "llama-3.1-8b-instant",
         "api_key_loaded": bool(GROQ_API_KEY),
+        "db_connected": db_ok,
+        "db_host": DB_HOST,
         "knowledge_chunks_loaded": len(KB_CHUNKS),
         "topics_loaded": len(TOPIC_MAP),
     }

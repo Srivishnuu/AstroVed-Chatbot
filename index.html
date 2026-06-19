@@ -757,6 +757,16 @@ function getProductLink(text) {
     return { label: '✨ View Special Events', url: SITE + '/us/specials' };
   if (t.includes('store') || t.includes('shop') || t.includes('buy'))
     return { label: '🛒 Visit Store', url: SITE + '/sale.aspx' };
+  if (has('special event'))
+  return { label: '✨ Special Events', url: SITE + '/<exact-path>' };
+  if (has('wealth remed'))
+  return { label: '💰 Wealth Remedies', url: SITE + '/<exact-path>' };
+  if (has('success homa'))
+  return { label: '🪔 Success Homas', url: SITE + '/<exact-path>' };
+  if (has('free astrology') || has('free tool'))
+  return { label: '🆓 Free Astrology Tools', url: SITE + '/<exact-path>' };
+  if (has('resource'))
+  return { label: '📚 Resources', url: SITE + '/<exact-path>' };
 
   return null;
 }
