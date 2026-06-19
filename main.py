@@ -15,6 +15,8 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 if not GROQ_API_KEY:
     raise RuntimeError("GROQ_API_KEY not found in .env file!")
 
+SITE = "https://www.astroved.com"
+
 # ── Handoff trigger keywords ───────────────────────────────────────────────────
 HANDOFF_KEYWORDS = [
     'payment','pay','billing','bill','invoice','refund','subscription',
@@ -26,6 +28,222 @@ HANDOFF_KEYWORDS = [
 def needs_handoff(text: str) -> bool:
     t = text.lower()
     return any(k in t for k in HANDOFF_KEYWORDS)
+
+# ── TOPIC MAP ───────────────────────────────────────────────────────────────
+# Single source of truth: topic -> matching keywords (checked against the
+# USER's message, not the bot's reply), the destination page, and a
+# guaranteed fallback 3-4 line description used if knowledge_base.txt has
+# no/weak content for that page (e.g. scraper missed it or site copy changed).
+#
+# IMPORTANT: order matters. More specific keys should be listed BEFORE
+# broader ones if there's any chance of substring overlap (e.g. "horoscope"
+# vs "horoscope matching" vs "moon sign" -- see match_topic() below which
+# checks all candidates and picks the LONGEST keyword match, so order in
+# the dict itself is not load-bearing, but keep it human-readable by intent.
+TOPIC_MAP = {
+    "nadi": {
+        "keywords": ["nadi", "nadi astrology", "nadi leaf", "palm leaf", "bhrigu nadi"],
+        "label": "📜 Nadi Astrology",
+        "url": f"{SITE}/nadi/nadi-astrology",
+        "fallback": (
+            "Nadi Astrology is an ancient Tamil palm-leaf prediction system where sages "
+            "centuries ago are believed to have inscribed individual life readings on dried "
+            "palm leaves, identified today by your thumb impression. It covers your past, "
+            "present, and future — including career, relationships, health, and remedies. "
+            "It's considered one of the most personalized forms of Vedic prediction."
+        ),
+    },
+    "horoscope_match": {
+        "keywords": ["compatibility", "kundali match", "kundli match", "horoscope matching", "marriage match", "gun milan"],
+        "label": "💑 Check Compatibility",
+        "url": f"{SITE}/astropedia/en/freetools/horoscope-matching",
+        "fallback": (
+            "Horoscope Matching (Kundali Matching) compares two birth charts across factors "
+            "like the 36 Guna Milan points, Mangal Dosha, and planetary compatibility to "
+            "assess marital harmony. It highlights strengths and potential friction areas "
+            "between partners before marriage."
+        ),
+    },
+    "birth_chart": {
+        "keywords": ["birth chart", "kundli", "kundali", "janam patrika", "janam kundli", "natal chart"],
+        "label": "📊 View Birth Chart",
+        "url": f"{SITE}/astropedia/en/freetools/birth-chart",
+        "fallback": (
+            "Your Birth Chart (Kundli) is a snapshot of the exact planetary positions at "
+            "your time, date, and place of birth, mapped across the 12 houses. It's the "
+            "foundation Vedic astrologers use to read personality, career, relationships, "
+            "and timing of major life events."
+        ),
+    },
+    "horoscope": {
+        "keywords": ["horoscope", "moon sign", "rashi", "daily horoscope", "weekly horoscope", "monthly horoscope"],
+        "label": "🌙 View Horoscope",
+        "url": f"{SITE}/horoscopes",
+        "fallback": (
+            "Your Horoscope is a daily, weekly, or monthly forecast based on your Moon sign "
+            "(Rashi), reflecting how current planetary transits are likely to affect your "
+            "mood, relationships, career, and health. It's a quick way to stay aligned with "
+            "the sky's current energy."
+        ),
+    },
+    "gemstone": {
+        "keywords": ["gemstone", "ruby", "emerald", "sapphire", "pearl stone", "navratna"],
+        "label": "💎 Explore Gemstones",
+        "url": f"{SITE}/astropedia/en/freetools/gemstone",
+        "fallback": (
+            "Vedic Gemstones are prescribed based on your birth chart to strengthen a "
+            "weak or beneficial planet's influence in your life. Each stone — like Ruby for "
+            "the Sun or Emerald for Mercury — is chosen, weighted, and worn according to "
+            "astrological rules, not just preference."
+        ),
+    },
+    "yantra": {
+        "keywords": ["yantra"],
+        "label": "🔱 Explore Yantras",
+        "url": f"{SITE}/remedies/yantra",
+        "fallback": (
+            "A Yantra is a sacred geometric diagram used in Vedic tradition to focus "
+            "energy and invoke specific planetary or divine blessings. Different Yantras "
+            "are recommended for wealth, protection, health, or removing specific doshas, "
+            "depending on your chart."
+        ),
+    },
+    "puja": {
+        "keywords": ["puja", "pooja", "ritual", "homa", "yagna", "havan"],
+        "label": "🪔 View Pujas & Homas",
+        "url": f"{SITE}/priest-services",
+        "fallback": (
+            "Pujas and Homas are traditional Vedic rituals performed by qualified priests "
+            "to seek divine blessings, remove obstacles (doshas), and bring positive energy "
+            "for specific life goals — from health and wealth to marriage and career. They "
+            "can be performed on your behalf at sacred temples."
+        ),
+    },
+    "numerology": {
+        "keywords": ["numerology", "lucky number", "destiny number"],
+        "label": "🔢 Numerology Reading",
+        "url": f"{SITE}/astropedia/en/freetools/numerology",
+        "fallback": (
+            "Numerology studies the vibrational meaning of numbers derived from your birth "
+            "date and name to reveal personality traits, life path, and lucky numbers. It's "
+            "often used alongside astrology to fine-tune timing for major decisions."
+        ),
+    },
+    "vastu": {
+        "keywords": ["vastu"],
+        "label": "🏠 Vastu Guidance",
+        "url": f"{SITE}/astropedia/en/vastu",
+        "fallback": (
+            "Vastu Shastra is the ancient Indian science of architecture and space "
+            "alignment, balancing the five elements within a home or workplace to promote "
+            "health, prosperity, and harmony for those who live or work there."
+        ),
+    },
+    "career": {
+        "keywords": ["career", "business astrology", "job astrology", "profession"],
+        "label": "💼 Career & Business",
+        "url": f"{SITE}/career-money/career-money-astrology",
+        "fallback": (
+            "Career & Business Astrology examines the 10th house, its lord, and relevant "
+            "planetary periods (dashas) in your chart to identify your ideal profession, "
+            "favorable timing for job changes, and potential for business success."
+        ),
+    },
+    "wealth": {
+        "keywords": ["wealth", "finance astrology", "money astrology"],
+        "label": "💰 Wealth & Finance",
+        "url": f"{SITE}/wealth-finance/wealth-finance-astrology",
+        "fallback": (
+            "Wealth & Finance Astrology looks at the 2nd and 11th houses along with "
+            "relevant planets to assess your financial strengths, potential risks, and the "
+            "best periods for investment or major financial decisions."
+        ),
+    },
+    "family": {
+        "keywords": ["family astrology", "children astrology", "fertility"],
+        "label": "👨‍👩‍👧 Family Astrology",
+        "url": f"{SITE}/fertility-children/fertility-children-astrology",
+        "fallback": (
+            "Family & Fertility Astrology examines the 5th house and related planetary "
+            "influences to offer guidance on childbirth timing, family harmony, and "
+            "remedies for delays or obstacles in starting a family."
+        ),
+    },
+    "education": {
+        "keywords": ["education astrology", "study astrology", "exam astrology"],
+        "label": "🎓 Education Astrology",
+        "url": f"{SITE}/education-astrology",
+        "fallback": (
+            "Education Astrology studies the 4th and 5th houses to indicate academic "
+            "strengths, the right field of study, and favorable timing for exams, "
+            "admissions, or higher studies abroad."
+        ),
+    },
+    "health": {
+        "keywords": ["health astrology", "beauty astrology"],
+        "label": "🩺 Health & Beauty",
+        "url": f"{SITE}/beauty-health/beauty-health-astrology",
+        "fallback": (
+            "Health & Beauty Astrology looks at the 1st and 6th houses to highlight "
+            "potential health vulnerabilities and suggest remedies, alongside guidance on "
+            "planetary influences related to personal appearance and vitality."
+        ),
+    },
+    "consult": {
+        "keywords": ["consult", "talk to astrologer", "speak to astrologer", "book astrologer"],
+        "label": "🔮 Talk to an Astrologer",
+        "url": f"{SITE}/astrovedspeaks/",
+        "fallback": (
+            "AstroVed connects you directly with experienced Vedic astrologers for a live, "
+            "personalized consultation — covering any area of your chart in depth, with "
+            "follow-up questions answered in real time."
+        ),
+    },
+    "remedies": {
+        "keywords": ["remedy", "remedies", "dosha", "pariharam"],
+        "label": "🌿 Explore Remedies",
+        "url": f"{SITE}/dosha-pariharam/",
+        "fallback": (
+            "Vedic Remedies (Pariharams) are prescribed actions — rituals, gemstones, "
+            "mantras, or charity — designed to ease the negative effects of doshas or "
+            "weak planets identified in your birth chart, and strengthen beneficial ones."
+        ),
+    },
+    "love": {
+        "keywords": ["love", "relationship astrology", "marriage astrology"],
+        "label": "❤️ Love & Relationships",
+        "url": f"{SITE}/love-marriage/love-and-relationship",
+        "fallback": (
+            "Love & Relationship Astrology examines the 5th and 7th houses, Venus, and "
+            "the Moon to offer insight into romantic compatibility, timing of marriage, and "
+            "remedies for relationship challenges."
+        ),
+    },
+    "store": {
+        "keywords": ["store", "shop", "buy online"],
+        "label": "🛒 Visit Store",
+        "url": f"{SITE}/sale.aspx",
+        "fallback": (
+            "The AstroVed store offers astrology-recommended products — gemstones, "
+            "yantras, rudraksha, and spiritual items — each selected to align with "
+            "specific planetary remedies from your chart."
+        ),
+    },
+}
+
+def match_topic(user_text: str):
+    """Find the best-matching topic for the USER's message (not the bot's
+    reply). Picks the topic whose matched keyword is the longest (most
+    specific), so e.g. 'horoscope matching' beats plain 'horoscope'."""
+    t = user_text.lower()
+    best = None
+    best_len = 0
+    for key, info in TOPIC_MAP.items():
+        for kw in info["keywords"]:
+            if kw in t and len(kw) > best_len:
+                best = key
+                best_len = len(kw)
+    return best
 
 # ── Load knowledge base into searchable chunks ────────────────────────────────
 def load_knowledge_base():
@@ -68,6 +286,19 @@ def search_knowledge(query: str, top_k: int = 3):
         result += f"\n[Page: {c['title']}]\nURL: {c['url']}\n{c['text'][:800]}\n"
     return result
 
+def search_knowledge_for_url(url_fragment: str, top_k: int = 2):
+    """Specifically pull KB chunks whose URL matches a known topic page,
+    e.g. '/nadi/' -- used to force on-topic content once a topic is matched."""
+    if not KB_CHUNKS:
+        return ""
+    matches = [c for c in KB_CHUNKS if url_fragment in c["url"].lower()]
+    if not matches:
+        return ""
+    result = ""
+    for c in matches[:top_k]:
+        result += f"\n[Page: {c['title']}]\nURL: {c['url']}\n{c['text'][:800]}\n"
+    return result
+
 BASE_SYSTEM_PROMPT = """You are AstroVed.AI, a Vedic astrology assistant for AstroVed website.
 
 RULES:
@@ -98,6 +329,17 @@ ZODIAC SIGNS IN TAMIL (format: "EnglishName (ராசி: TamilName)"):
 CONFIDENTIAL EXCEPTION:
 If payment/billing/refund/account details asked -> say exactly:
 'Let me connect you with our specialist team.' and stop."""
+
+TOPIC_FORCE_INSTRUCTION = """
+
+=== USER IS ASKING SPECIFICALLY ABOUT: {label} ===
+You MUST answer using ONLY the content below about this exact topic. Give a
+focused 3-4 line overview. Do NOT talk about zodiac signs, horoscopes, or any
+other topic unless the content below is about that.
+
+{content}
+
+=== END TOPIC CONTENT ==="""
 
 # ── Keep-alive ──────────────────────────────────────────────────────────────
 async def keep_alive():
@@ -131,7 +373,6 @@ app.add_middleware(
 def init_db():
     conn = sqlite3.connect("chat.db")
 
-    # Existing chat messages table
     conn.execute("""
         CREATE TABLE IF NOT EXISTS messages (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -142,7 +383,6 @@ def init_db():
         )
     """)
 
-    # agent_sessions — tracks handoff status per chat session
     conn.execute("""
         CREATE TABLE IF NOT EXISTS agent_sessions (
             session_id    TEXT PRIMARY KEY,
@@ -158,7 +398,6 @@ def init_db():
         )
     """)
 
-    # agents — login table for support team members
     conn.execute("""
         CREATE TABLE IF NOT EXISTS agents (
             id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -207,7 +446,6 @@ def hash_password(pw: str) -> str:
     return hashlib.sha256(pw.encode()).hexdigest()
 
 def seed_default_agents():
-    """Create default agent accounts if none exist (CHANGE THESE PASSWORDS!)."""
     conn = sqlite3.connect("chat.db")
     count = conn.execute("SELECT COUNT(*) FROM agents").fetchone()[0]
     if count == 0:
@@ -263,8 +501,6 @@ class SessionStartRequest(BaseModel):
 
 @app.post("/session/start")
 async def session_start(req: SessionStartRequest):
-    """Called once right after the form is submitted — saves the lead
-    immediately, even before the user types a single message."""
     try:
         conn = sqlite3.connect("chat.db")
         existing = conn.execute(
@@ -292,7 +528,6 @@ async def session_start(req: SessionStartRequest):
 
 @app.get("/admin/users")
 async def admin_users():
-    """Quick way to check captured leads — visit this URL in a browser."""
     conn = sqlite3.connect("chat.db")
     rows = conn.execute(
         """SELECT session_id, user_name, user_email, user_phone, status,
@@ -310,7 +545,6 @@ async def admin_users():
 @app.post("/chat")
 async def chat(req: ChatRequest):
     try:
-        # Check if this session is already handed off to an agent
         conn = sqlite3.connect("chat.db")
         row = conn.execute(
             "SELECT status FROM agent_sessions WHERE session_id=?",
@@ -319,7 +553,6 @@ async def chat(req: ChatRequest):
         conn.close()
 
         if row and row[0] == "with_agent":
-            # Session is with a human agent — just save the message, don't call AI
             save_message(req.session_id, "user", req.message)
             return {"reply": None, "mode": "with_agent"}
 
@@ -334,12 +567,33 @@ async def chat(req: ChatRequest):
             )
             reply = "I understand this needs special attention. Connecting you with our specialist team now — they'll be with you shortly! 🎧"
             save_message(req.session_id, "assistant", reply)
-            return {"reply": reply, "mode": "handoff_triggered"}
+            return {"reply": reply, "mode": "handoff_triggered", "topic_url": None, "topic_label": None}
 
-        relevant_content = search_knowledge(req.message, top_k=3)
+        # ── Topic detection runs on the USER's message, not the bot's reply ──
+        topic_key = match_topic(req.message)
+        topic_info = TOPIC_MAP.get(topic_key) if topic_key else None
+
         system_content = BASE_SYSTEM_PROMPT
-        if relevant_content:
-            system_content += f"\n\n=== RELEVANT WEBSITE CONTENT ===\n{relevant_content}\n=== END CONTENT ==="
+
+        if topic_info:
+            # Try to pull real scraped content for that page first
+            url_fragment = topic_info["url"].replace(SITE, "").strip("/").split("/")[0]
+            kb_content = search_knowledge_for_url(url_fragment)
+            if not kb_content:
+                # Fall back to general keyword search
+                kb_content = search_knowledge(req.message, top_k=2)
+            if not kb_content:
+                # Last resort: guaranteed fallback description so the bot
+                # NEVER goes off-topic or says nothing useful
+                kb_content = f"[Page: {topic_info['label']}]\nURL: {topic_info['url']}\n{topic_info['fallback']}\n"
+
+            system_content += TOPIC_FORCE_INSTRUCTION.format(
+                label=topic_info["label"], content=kb_content
+            )
+        else:
+            relevant_content = search_knowledge(req.message, top_k=3)
+            if relevant_content:
+                system_content += f"\n\n=== RELEVANT WEBSITE CONTENT ===\n{relevant_content}\n=== END CONTENT ==="
 
         messages = [{"role": "system", "content": system_content}]
         for h in history:
@@ -356,7 +610,15 @@ async def chat(req: ChatRequest):
 
         reply = response.choices[0].message.content
         save_message(req.session_id, "assistant", reply)
-        return {"reply": reply, "mode": "bot"}
+
+        # Return the topic URL EXPLICITLY — frontend no longer needs to
+        # guess the link by scanning the bot's reply text for keywords.
+        return {
+            "reply": reply,
+            "mode": "bot",
+            "topic_url": topic_info["url"] if topic_info else None,
+            "topic_label": topic_info["label"] if topic_info else None,
+        }
 
     except Exception as e:
         print(f"ERROR in /chat: {str(e)}")
@@ -365,7 +627,6 @@ async def chat(req: ChatRequest):
 # ── Poll endpoint — frontend checks for agent replies ──────────────────────────
 @app.get("/poll/{session_id}")
 async def poll_session(session_id: str, since_id: int = 0):
-    """Frontend calls this every few seconds to check for new agent messages."""
     try:
         conn = sqlite3.connect("chat.db")
         rows = conn.execute(
@@ -422,58 +683,6 @@ async def handoff(req: HandoffRequest):
             f"Handoff requested: {req.issue_type} (priority: {req.priority})"
         )
         return {"status": "queued"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-# ── Session start — saves the lead form the moment it's submitted ──────────────
-@app.post("/session/start")
-async def session_start(req: SessionStartRequest):
-    """Called once right after the user submits the lead-capture form on the
-    widget — stores name/email/phone immediately, even before they send a
-    single chat message."""
-    try:
-        conn = sqlite3.connect("chat.db")
-        existing = conn.execute(
-            "SELECT session_id FROM agent_sessions WHERE session_id=?", (req.session_id,)
-        ).fetchone()
-        if existing:
-            conn.execute(
-                """UPDATE agent_sessions
-                   SET user_name=?, user_email=?, user_phone=?, updated_at=CURRENT_TIMESTAMP
-                   WHERE session_id=?""",
-                (req.user_name, req.user_email, req.user_phone, req.session_id)
-            )
-        else:
-            conn.execute(
-                """INSERT INTO agent_sessions
-                   (session_id, user_name, user_email, user_phone, status)
-                   VALUES (?,?,?,?, 'bot')""",
-                (req.session_id, req.user_name, req.user_email, req.user_phone)
-            )
-        conn.commit()
-        conn.close()
-        return {"status": "ok"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-# ── Admin: view every lead ever captured (any status) ───────────────────────────
-@app.get("/admin/users")
-async def admin_users():
-    """Quick way to check captured leads & chat status — open this URL in a browser."""
-    try:
-        conn = sqlite3.connect("chat.db")
-        rows = conn.execute(
-            """SELECT session_id, user_name, user_email, user_phone, status,
-                      issue_type, created_at, updated_at
-               FROM agent_sessions ORDER BY updated_at DESC"""
-        ).fetchall()
-        conn.close()
-        users = [
-            {"session_id": r[0], "user_name": r[1], "user_email": r[2], "user_phone": r[3],
-             "status": r[4], "issue_type": r[5], "created_at": r[6], "updated_at": r[7]}
-            for r in rows
-        ]
-        return {"users": users}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -584,10 +793,6 @@ async def agent_close(req: CloseSessionRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 # ── Agent dashboard — live chat console for the CRM/support team ───────────────
-# Visit https://<your-render-url>/agent/dashboard in a browser.
-# Default logins: agent1 / astroved123  and  agent2 / astroved123
-# CHANGE THESE PASSWORDS before sharing this URL with your team.
-
 AGENT_DASHBOARD_HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -764,14 +969,6 @@ function loadHistory() {
   }).catch(()=>{});
 }
 
-uName = n.split(' ')[0]; uEmail = e; uPhone = document.getElementById('fcc').value + ' ' + p;
-
-fetch(API + '/session/start', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ session_id: sessId, user_name: n, user_email: e, user_phone: uPhone })
-}).catch(() => {});
-
 function claimSession() {
   if (!activeSession) return;
   fetch(API + '/agent/claim/' + activeSession + '?agent_name=' + encodeURIComponent(agentName), {method:'POST'})
@@ -817,5 +1014,6 @@ def root():
         "status": "AstroVed.AI is online",
         "model": "llama-3.1-8b-instant",
         "api_key_loaded": bool(GROQ_API_KEY),
-        "knowledge_chunks_loaded": len(KB_CHUNKS)
+        "knowledge_chunks_loaded": len(KB_CHUNKS),
+        "topics_loaded": len(TOPIC_MAP),
     }
