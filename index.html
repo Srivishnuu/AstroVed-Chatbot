@@ -698,11 +698,13 @@ function startChat() {
 /* ── Clean markdown ── */
 function cleanMd(t) {
   return t
+    .replace(/https?:\/\/[^\s)]+/g, '')   // remove any raw URL the LLM might still leak
     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.*?)\*/g, '$1')
     .replace(/#{1,6}\s/g, '')
     .replace(/`(.*?)`/g, '$1')
     .replace(/\n/g, '<br>');
+
 }
 
 /* ── Product links ── */
