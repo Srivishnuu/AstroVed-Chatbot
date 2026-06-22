@@ -830,6 +830,7 @@ async function send() {
 }
 
 async function callAPI(txt, attempt = 0) {
+  await new Promise(r => setTimeout(r, 5000));
   try {
     const res = await fetch(API + '/chat', {
       method: 'POST',
@@ -854,28 +855,37 @@ async function callAPI(txt, attempt = 0) {
     }
   }
 }
+async function callAPI(txt, attempt = 0) {
+  await new Promise(r => setTimeout(r, 5000));
+  try {
+    const res = await fetch(API + '/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessId, message: txt })
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const d = await res.json();
+    rmTyping();
+    if (d.mode === 'with_agent') { startPolling(); return; }
+    if (d.mode === 'handoff_triggered') { botMsg(d.reply, []); startPolling(); return; }
+
+    const link = (d.topic_url && d.topic_label) ? { url: d.topic_url, label: d.topic_label } : null;
+    botMsg(d.reply || 'Please try again.', [], link);
+  } catch (e) {
+    if (attempt < 2) {
+      await new Promise(r => setTimeout(r, 5000));
+      await callAPI(txt, attempt + 1);
+    } else {
+      rmTyping();
+      botMsg('Server is waking up... Please resend your message in 30 seconds! 🔄', []);
+    }
+  }
+}
+// ← Nothing else here. The orphaned block below this was DELETED.
     // Use the backend's own topic detection — it ran match_topic() on the
     // USER's message, which is far more reliable than re-guessing from
     // the bot's reply text.
-    try {
-    const link = d.topic_url ? { url: d.topic_url, label: d.topic_label } : null;
-    botMsg(d.reply || 'Please try again.', [], link);
-} catch (e) {
-    if (attempt < 2) {
-        await new Promise(r => setTimeout(r, 5000));
-        await callAPI(txt, attempt + 1);
-    } else {
-        rmTyping();
-        botMsg('Server is waking up... Please resend your message in 30 seconds! 🔄', []);
-    }
-}
-
-function doQR(b) {
-  const txt = b.textContent.trim();
-  if (txt.includes('Customer Support')) { showCRM(); return; }
-  document.getElementById('inp').value = txt.replace(/^[^\s]+\s/, '').trim();
-  send();
-}
+    
 function doOpt(b) {
   const txt = b.textContent.trim();
   if (txt.includes('Customer Support')) { showCRM(); return; }
