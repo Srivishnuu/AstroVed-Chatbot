@@ -557,7 +557,7 @@ body{font-family:var(--font-b);background:var(--deep);min-height:100vh}
 
   <!-- ── ENDED SCREEN ── -->
   <div class="scr" id="ended">
-    <img class="ended-logo" src="data:image/png;base64,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" alt="AstroVed"/>
+    <img class="ended-logo" id="ended-logo-img" src="" alt="AstroVed"/>
     <div class="ended-title">Thank You! ✨</div>
     <div class="ended-sub">We hope the stars guided you well.<br>Rate your experience:</div>
     <div class="rating">
@@ -582,7 +582,7 @@ const LOGO_SRC = 'data:image/png;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/4gHYSUNDX1BS
 
 // Apply real logo to header and form hero
 document.addEventListener('DOMContentLoaded', function() {
-  document.querySelectorAll('.logo-img, .fhero-logo, .ended-logo').forEach(function(img) {
+  document.querySelectorAll('.logo-img, .fhero-logo, .ended-logo, #ended-logo-img').forEach(function(img) {
     img.src = LOGO_SRC;
   });
 });
@@ -693,7 +693,7 @@ function startChat() {
     '<div class="wn">Namaste, ' + uName + ' 🙏</div></div>' +
     '<p>✨ Welcome to AstroVed.AI — your personal Vedic cosmos companion. The universe has a message for you today. How may the stars guide your path?</p>';
   m.appendChild(wc);
-  const opts = ['🌙Today\'s Horoscope', '📊Free Birth Chart', '💑Compatibility Match', '❤️Love & Relations', '🌿Remedies', '🎧Customer Support'];
+  const opts = ['🌙Today\'s Horoscope', '📊Free Birth Chart', '💑Compatibility Match', '❤️Love & Relations', '🌿Remedies'];
   botMsg('The cosmos awaits, ' + uName + '! What would you like to explore today?', opts);
 }
 
@@ -709,25 +709,23 @@ function cleanMd(t) {
 
 }
 
-/* ── Product links ── */
-/*function getProductLink(text) {
-  const t = text.toLowerCase();
-
-  // Horoscope/Moon-sign listing checked FIRST — "Gemini" contains "gem"
-  // and was wrongly triggering the Gemstone rule before this fix.
+/* ── Fallback link detection based on user's message ── */
+function getFallbackLink(txt) {
+  const t = (txt || '').toLowerCase();
   if (t.includes('horoscope') || t.includes('moon sign') || t.includes('rashi'))
     return { label: '🌙 View Horoscope', url: SITE + '/horoscopes' };
   if (t.includes('birth chart') || t.includes('kundli') || t.includes('janam'))
     return { label: '📊 View Birth Chart', url: SITE + '/astropedia/en/freetools/birth-chart' };
-  if (t.includes('compatibility') || t.includes('kundali match'))
+  if (t.includes('compatibility') || t.includes('kundali match') || t.includes('match'))
     return { label: '💑 Check Compatibility', url: SITE + '/astropedia/en/freetools/horoscope-matching' };
+  if (t.includes('palm') || t.includes('palmistry'))
+    return { label: '🖐 Palm Reading Report', url: SITE + '/palmistry-report' };
   if (t.includes('gemstone') || t.includes('ruby') || t.includes('emerald') || t.includes('sapphire'))
     return { label: '💎 Explore Gemstones', url: SITE + '/astropedia/en/freetools/gemstone' };
   if (t.includes('yantra'))
     return { label: '🔱 Explore Yantras', url: SITE + '/remedies/yantra' };
-  if (t.includes('puja') || t.includes('pooja') || t.includes('ritual') || t.includes('homa'))
+  if (t.includes('puja') || t.includes('pooja') || t.includes('homa'))
     return { label: '🪔 View Pujas & Homas', url: SITE + '/fire-lab-homa' };
-    return { label: '🪔 View Pujas & Homas', url: SITE + '/pooja-c11' };
   if (t.includes('numerology'))
     return { label: '🔢 Numerology Reading', url: SITE + '/astropedia/en/freetools/numerology' };
   if (t.includes('vastu'))
@@ -738,31 +736,18 @@ function cleanMd(t) {
     return { label: '💼 Career & Business', url: SITE + '/career-money/career-money-astrology' };
   if (t.includes('wealth') || t.includes('finance') || t.includes('money'))
     return { label: '💰 Wealth & Finance', url: SITE + '/wealth-finance/wealth-finance-astrology' };
-  if (t.includes('family') || t.includes('children') || t.includes('fertility'))
-    return { label: '👨‍👩‍👧 Family Astrology', url: SITE + '/fertility-children/fertility-children-astrology' };
-  if (t.includes('education') || t.includes('study') || t.includes('exam'))
-    return { label: '🎓 Education Astrology', url: SITE + '/education-astrology' };
-  if (t.includes('health') || t.includes('beauty'))
-    return { label: '🩺 Health & Beauty', url: SITE + '/beauty-health/beauty-health-astrology' };
-  if (t.includes('consult') || t.includes('astrologer'))
-    return { label: '🔮 Talk to an Astrologer', url: SITE + '/astrovedspeaks/' };
-  if (t.includes('blog'))
-    return { label: '📰 Read Blogs', url: SITE + '/blogs' };
-  if (t.includes('article'))
-    return { label: '📰 Read Articles', url: SITE + '/articles' };
-  if (t.includes('service') || t.includes('pricing'))
-    return { label: '✨ View All Services', url: SITE + '/astrology-services' };
-  if (t.includes('remed'))
-    return { label: '🌿 Explore Remedies', url: SITE + '/dosha-pariharam/' };
   if (t.includes('love') || t.includes('relation') || t.includes('marriage'))
     return { label: '❤️ Love & Relationships', url: SITE + '/love-marriage/love-and-relationship' };
-  if (t.includes('special event'))
-    return { label: '✨ View Special Events', url: SITE + '/us/specials' };
-  if (t.includes('store') || t.includes('shop') || t.includes('buy'))
-    return { label: '🛒 Visit Store', url: SITE + '/sale.aspx' };
-
+  if (t.includes('health'))
+    return { label: '🩺 Health Astrology', url: SITE + '/beauty-health/beauty-health-astrology' };
+  if (t.includes('remed'))
+    return { label: '🌿 Explore Remedies', url: SITE + '/dosha-pariharam/' };
+  if (t.includes('consult') || t.includes('astrologer'))
+    return { label: '🔮 Talk to an Astrologer', url: SITE + '/astrovedspeaks/' };
+  if (t.includes('report') || t.includes('yes') || t.includes('link'))
+    return { label: '✨ View All Services', url: SITE + '/astrology-services' };
   return null;
-}*/
+}
 
 /* ── Add bot message ── */
 /* ── Add bot message ── */
@@ -869,7 +854,7 @@ async function callAPI(txt, attempt = 0) {
     if (d.mode === 'with_agent') { startPolling(); return; }
     if (d.mode === 'handoff_triggered') { botMsg(d.reply, []); startPolling(); return; }
 
-    const link = (d.topic_url && d.topic_label) ? { url: d.topic_url, label: d.topic_label } : null;
+    let link = (d.topic_url && d.topic_label) ? { url: d.topic_url, label: d.topic_label } : getFallbackLink(txt);
     botMsg(d.reply || 'Please try again.', [], link);
   } catch (e) {
     if (attempt < 2) {
@@ -886,10 +871,10 @@ async function callAPI(txt, attempt = 0) {
     // USER's message, which is far more reliable than re-guessing from
     // the bot's reply text.
     
-function doOpt(b) {
+function doQR(b) {
   const txt = b.textContent.trim();
   if (txt.includes('Customer Support')) { showCRM(); return; }
-  document.getElementById('inp').value = txt.replace(/^[^\s]+\s/, '').trim();
+  document.getElementById('inp').value = txt;
   send();
 }
 function onKey(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }
