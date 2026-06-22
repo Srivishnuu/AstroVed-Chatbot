@@ -599,8 +599,10 @@ function startPolling() {
       const d = await res.json();
       d.messages.forEach(m => {
         lastSeenMsgId = Math.max(lastSeenMsgId, m.id);
-        if (m.role === 'assistant') botMsg(m.content, []);
-        else if (m.role === 'system') botMsg('🔔 ' + m.content, []);
+        // System messages and live agent replies NEVER get a product link.
+        // Only the bot's own AI replies (handled in callAPI) carry topic links.
+        if (m.role === 'assistant') botMsg(m.content, []);          // no link
+        else if (m.role === 'system') botMsg('🔔 ' + m.content, []); // no link
       });
       if (d.status === 'closed' || d.status === 'bot') { clearInterval(pollTimer); pollTimer = null; }
     } catch (e) {}
@@ -708,7 +710,7 @@ function cleanMd(t) {
 }
 
 /* ── Product links ── */
-function getProductLink(text) {
+/*function getProductLink(text) {
   const t = text.toLowerCase();
 
   // Horoscope/Moon-sign listing checked FIRST — "Gemini" contains "gem"
@@ -760,15 +762,18 @@ function getProductLink(text) {
     return { label: '🛒 Visit Store', url: SITE + '/sale.aspx' };
 
   return null;
-}
+}*/
 
 /* ── Add bot message ── */
-function botMsg(txt, opts) {
+/* ── Add bot message ── */
+/* ── Add bot message ── */
+/* ── Add bot message ── */
+function botMsg(txt, opts, link) {
   const m = document.getElementById('msgs');
   const row = document.createElement('div'); row.className = 'mrow bot';
-  const link = getProductLink(txt);
+
   let linkHtml = '';
-  if (link) {
+  if (link && link.url && link.label) {
     linkHtml = '<br><a class="link-btn" href="' + link.url + '" target="_blank" rel="noopener">' +
       '<svg viewBox="0 0 24 24"><path d="M19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/></svg>' +
       link.label + '</a>';
@@ -807,43 +812,6 @@ function showTyping() {
 function rmTyping() { const t = document.getElementById('typ'); if (t) t.remove(); }
 function scrl() { const m = document.getElementById('msgs'); m.scrollTop = m.scrollHeight; }
 
-/* ── Edit message ── */
-function editMsg(msgId, btn) {
-  const row = document.getElementById('msg-' + msgId);
-  const bbl = row.querySelector('.bbl.user');
-  const origText = bbl.innerText.trim();
-  const enc = encodeURIComponent(origText);
-  bbl.innerHTML =
-    '<textarea class="edit-input" rows="2">' + origText + '</textarea>' +
-    '<div class="edit-actions">' +
-    '<button class="edit-cancel" onclick="cancelEdit(\'' + msgId + '\',\'' + enc + '\')">Cancel</button>' +
-    '<button class="edit-save" onclick="saveEdit(\'' + msgId + '\')">Send ↵</button>' +
-    '</div>';
-  bbl.querySelector('.edit-input').focus();
-}
-
-function cancelEdit(msgId, origEncoded) {
-  const row = document.getElementById('msg-' + msgId);
-  const bbl = row.querySelector('.bbl.user');
-  const orig = decodeURIComponent(origEncoded);
-  bbl.innerHTML = cleanMd(orig) +
-    '<button class="edit-btn" onclick="editMsg(\'' + msgId + '\',this)" title="Edit">✏</button>';
-}
-
-async function saveEdit(msgId) {
-  const row = document.getElementById('msg-' + msgId);
-  const bbl = row.querySelector('.bbl.user');
-  const newText = bbl.querySelector('.edit-input').value.trim();
-  if (!newText) return;
-  bbl.innerHTML = cleanMd(newText) +
-    '<button class="edit-btn" onclick="editMsg(\'' + msgId + '\',this)" title="Edit">✏</button>';
-  // Remove all messages after this one
-  let next = row.nextSibling;
-  while (next) { let n = next.nextSibling; next.remove(); next = n; }
-  showTyping();
-  await callAPI(newText);
-}
-
 /* ── Send ── */
 async function send() {
   const inp = document.getElementById('inp');
@@ -852,7 +820,7 @@ async function send() {
   document.getElementById('qrs').style.display = 'none';
   msgCounter++;
   userMsg(txt, 'm' + msgCounter);
-  
+
   if (CRM_KW.some(k => txt.toLowerCase().includes(k))) {
     botMsg('Let me connect you with our specialist team right away!', []);
     setTimeout(showCRM, 800); return;
@@ -873,7 +841,9 @@ async function callAPI(txt, attempt = 0) {
     rmTyping();
     if (d.mode === 'with_agent') { startPolling(); return; }
     if (d.mode === 'handoff_triggered') { botMsg(d.reply, []); startPolling(); return; }
-    botMsg(d.reply || 'Please try again.', []);
+
+    const link = (d.topic_url && d.topic_label) ? { url: d.topic_url, label: d.topic_label } : null;
+    botMsg(d.reply || 'Please try again.', [], link);
   } catch (e) {
     if (attempt < 2) {
       await new Promise(r => setTimeout(r, 5000));
@@ -883,6 +853,21 @@ async function callAPI(txt, attempt = 0) {
       botMsg('Server is waking up... Please resend your message in 30 seconds! 🔄', []);
     }
   }
+}
+    // Use the backend's own topic detection — it ran match_topic() on the
+    // USER's message, which is far more reliable than re-guessing from
+    // the bot's reply text.
+    try {
+    const link = d.topic_url ? { url: d.topic_url, label: d.topic_label } : null;
+    botMsg(d.reply || 'Please try again.', [], link);
+} catch (e) {
+    if (attempt < 2) {
+        await new Promise(r => setTimeout(r, 5000));
+        await callAPI(txt, attempt + 1);
+    } else {
+        rmTyping();
+        botMsg('Server is waking up... Please resend your message in 30 seconds! 🔄', []);
+    }
 }
 
 function doQR(b) {
