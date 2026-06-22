@@ -380,38 +380,46 @@ async def chat(req: ChatRequest):
             save_message(req.session_id, "assistant", reply)
             return {"reply": reply, "mode": "handoff_triggered", "topic_url": None, "topic_label": None}
 
-        # ── Topic detection runs on the USER's message, not the bot's reply ──
-        topic_key = match_topic(req.message)
+        # ── Topic detection ──────────────────────────────────────────────────
+        topic_key  = match_topic(req.message)          # returns a key string or None
         topic_info = TOPIC_MAP.get(topic_key) if topic_key else None
+        topic_url  = topic_info["url"]   if topic_info else None
+        topic_label= topic_info["label"] if topic_info else None
 
+        # ── Build system prompt ──────────────────────────────────────────────
         system_content = BASE_SYSTEM_PROMPT
 
         if topic_info:
-            # Try to pull real scraped content for that page first
             url_fragment = topic_info["url"].replace(SITE, "").strip("/").split("/")[0]
             kb_content = search_knowledge_for_url(url_fragment)
             if not kb_content:
-                # Fall back to general keyword search
                 kb_content = search_knowledge(req.message, top_k=2)
             if not kb_content:
-                # Last resort: guaranteed fallback description so the bot
-                # NEVER goes off-topic or says nothing useful
-                kb_content = f"[Page: {topic_info['label']}]\nURL: {topic_info['url']}\n{topic_info['fallback']}\n"
-
+                kb_content = (
+                    f"[Page: {topic_info['label']}]\n"
+                    f"URL: {topic_info['url']}\n"
+                    f"{topic_info.get('fallback','')}\n"
+                )
             system_content += TOPIC_FORCE_INSTRUCTION.format(
                 label=topic_info["label"], content=kb_content
             )
         else:
             relevant_content = search_knowledge(req.message, top_k=3)
             if relevant_content:
-                system_content += f"\n\n=== RELEVANT WEBSITE CONTENT ===\n{relevant_content}\n=== END CONTENT ==="
+                system_content += (
+                    f"\n\n=== RELEVANT WEBSITE CONTENT ===\n"
+                    f"{relevant_content}\n"
+                    f"=== END CONTENT ==="
+                )
 
+        # ── Build messages list ──────────────────────────────────────────────
         messages = [{"role": "system", "content": system_content}]
         for h in history:
             if h["role"] in ("user", "assistant"):
                 messages.append({"role": h["role"], "content": str(h["content"])})
         messages.append({"role": "user", "content": str(req.message)})
 
+        # ── Call Groq LLM ────────────────────────────────────────────────────
         response = client.chat.completions.create(
             model="llama-3.1-8b-instant",
             messages=messages,
@@ -421,10 +429,6 @@ async def chat(req: ChatRequest):
 
         reply = response.choices[0].message.content
         save_message(req.session_id, "assistant", reply)
-
-        # Return the topic URL EXPLICITLY — frontend no longer needs to
-        # guess the link by scanning the bot's reply text for keywords.
-        topic_url, topic_label = match_topic(req.message)
 
         return {
             "reply": reply,
@@ -436,7 +440,7 @@ async def chat(req: ChatRequest):
     except Exception as e:
         print(f"ERROR in /chat: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Chat error: {str(e)}")
-
+    
 # ── Poll endpoint — frontend checks for agent replies ──────────────────────────
 @app.get("/poll/{session_id}")
 async def poll_session(session_id: str, since_id: int = 0):
