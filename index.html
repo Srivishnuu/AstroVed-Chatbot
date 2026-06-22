@@ -877,6 +877,15 @@ function doQR(b) {
   document.getElementById('inp').value = txt;
   send();
 }
+
+function doOpt(b) {
+  const txt = b.textContent.trim();
+  // Remove the clicked option buttons so they don't repeat
+  const optContainer = b.closest('.opt-btns');
+  if (optContainer) optContainer.remove();
+  document.getElementById('inp').value = txt;
+  send();
+}
 function onKey(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }
 function grow(el) { el.style.height = ''; el.style.height = Math.min(el.scrollHeight, 80) + 'px'; }
 
