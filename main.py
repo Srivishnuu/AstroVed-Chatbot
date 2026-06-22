@@ -7,6 +7,7 @@ import sqlite3, os, asyncio, httpx, re, secrets, hashlib
 from contextlib import asynccontextmanager
 from datetime import datetime
 from dotenv import load_dotenv
+from topic_map import TOPIC_MAP, match_topic  # ← this line stays
 
 load_dotenv()
 
@@ -613,11 +614,13 @@ async def chat(req: ChatRequest):
 
         # Return the topic URL EXPLICITLY — frontend no longer needs to
         # guess the link by scanning the bot's reply text for keywords.
+        topic_url, topic_label = match_topic(req.message)
+
         return {
             "reply": reply,
             "mode": "bot",
-            "topic_url": topic_info["url"] if topic_info else None,
-            "topic_label": topic_info["label"] if topic_info else None,
+            "topic_url": topic_url,
+            "topic_label": topic_label,
         }
 
     except Exception as e:
