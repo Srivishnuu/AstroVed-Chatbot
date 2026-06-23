@@ -56,6 +56,14 @@ def match_topic(user_text: str):
                 best_len = len(kw)
     return best
 
+import unicodedata
+def detect_language(text: str) -> str:
+    """Detect if text is Tamil or English based on Unicode script."""
+    tamil_chars = sum(1 for c in text if '\u0B80' <= c <= '\u0BFF')
+    if tamil_chars > 0:
+        return "tamil"
+    return "english"
+
 # ── Load knowledge base into searchable chunks ────────────────────────────────
 def load_knowledge_base():
     chunks = []
