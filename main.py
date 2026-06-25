@@ -839,9 +839,9 @@ tr:hover td{background:rgba(255,255,255,.018)}
 /* ── State ── */
 const API=window.location.origin;
 let agent='',activeSid=null,activeData=null,pollH=null,pollL=null,curTab='all',showAna=false,rpCurTab='user';
+let allSessions=[];
 let sseConn=null, lastQueueCount=0;
 
-// Notification sound (Web Audio API — no file needed)
 function playNotifSound(){
   try{
     const ctx=new(window.AudioContext||window.webkitAudioContext)();
@@ -858,34 +858,6 @@ function playNotifSound(){
   }catch(e){}
 }
 
-function connectSSE(){
-  if(sseConn)sseConn.close();
-  sseConn=new EventSource(API+'/agent/events');
-  sseConn.onmessage=function(e){
-    try{
-      const d=JSON.parse(e.data);
-      if(d.type==='queue_update'){
-        if(d.count > lastQueueCount){
-          // New user entered queue!
-          playNotifSound();
-          const newOnes=d.sessions.slice(0, d.count - lastQueueCount);
-          newOnes.forEach(s=>{
-            toast('🔔 New chat: '+(s.user_name||'Anonymous'), 4000);
-          });
-          showDesktopNotif(d.count - lastQueueCount);
-        }
-        lastQueueCount=d.count;
-        // Update badge without full reload
-        document.getElementById('qbadge').textContent=d.count;
-      }
-    }catch(err){}
-  };
-  sseConn.onerror=function(){
-    // Reconnect after 5s if SSE drops
-    setTimeout(connectSSE, 5000);
-  };
-}
-
 function showDesktopNotif(count){
   if(!('Notification' in window))return;
   if(Notification.permission==='granted'){
@@ -899,6 +871,29 @@ function showDesktopNotif(count){
       if(p==='granted') showDesktopNotif(count);
     });
   }
+}
+
+function connectSSE(){
+  if(sseConn)sseConn.close();
+  sseConn=new EventSource(API+'/agent/events');
+  sseConn.onmessage=function(e){
+    try{
+      const d=JSON.parse(e.data);
+      if(d.type==='queue_update'){
+        if(d.count > lastQueueCount){
+          playNotifSound();
+          const diff = d.count - lastQueueCount;
+          toast('🔔 New chat: '+(d.sessions[0]?d.sessions[0].user_name||'Anonymous':'User'), 4000);
+          showDesktopNotif(diff);
+        }
+        lastQueueCount=d.count;
+        document.getElementById('qbadge').textContent=d.count;
+      }
+    }catch(err){}
+  };
+  sseConn.onerror=function(){
+    setTimeout(connectSSE,5000);
+  };
 }
 
 /* ── Toast ── */
@@ -927,7 +922,7 @@ function enterApp(){
     Notification.requestPermission();
   }
 }
-}
+
 function doLogout(){sessionStorage.clear();clearInterval(pollL);clearInterval(pollH);location.reload();}
 (function auto(){const a=sessionStorage.getItem('av_ag');if(a){agent=a;enterApp();}})();
 
