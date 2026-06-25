@@ -8,6 +8,9 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from dotenv import load_dotenv
 from topic_map import TOPIC_MAP, match_topic
+from fastapi.responses import StreamingResponse
+import json as json_lib
+import asyncio
 
 load_dotenv()
 
@@ -74,28 +77,36 @@ def search_knowledge_for_url(url_fragment: str, top_k: int = 2):
     matches = [c for c in KB_CHUNKS if url_fragment in c["url"].lower()]
     return "".join(f"\n[Page: {c['title']}]\nURL: {c['url']}\n{c['text'][:800]}\n" for c in matches[:top_k])
 
-BASE_SYSTEM_PROMPT = """You are AstroVed.AI, a Vedic astrology assistant for AstroVed website.
+BASE_SYSTEM_PROMPT = """You are AstroVed.AI, a Vedic astrology assistant for AstroVed (https://www.astroved.com).
 
-RULES:
-- Answer using the WEBSITE CONTENT provided below when relevant to the question
-- Keep replies short: max 3-4 lines
-- If user asks types/list/categories -> show short numbered list, wait for selection
-- After selection -> explain in 3-4 lines only
-- Be warm, mystical, helpful always
-- If website content has a relevant product/page URL, mention you can share the link
-- If no relevant website content given, answer using general Vedic astrology knowledge
-- Never refuse a question
-- Whenever you list the 12 zodiac/Moon signs, you MUST use the exact Tamil names below
+CORE RULES:
+- Always answer using the WEBSITE CONTENT provided — it has accurate product/service info
+- If website content is provided, base your answer primarily on it
+- Keep replies focused: 3-5 lines maximum for simple questions
+- For lists/types/categories → numbered list (max 6 items), then wait for user to pick one
+- After user picks → give 3-4 line detailed answer about THAT specific item
+- Always be warm, mystical, Vedic in tone
+- Never make up prices, dates, or specific product details not in the content
+- Never refuse a question — if unsure, give general Vedic astrology guidance
 
-ZODIAC SIGNS IN TAMIL (format: "EnglishName (ராசி: TamilName)"):
-1. Aries (ராசி: மேஷம்) 2. Taurus (ராசி: ரிஷபம்) 3. Gemini (ராசி: மிதுனம்)
-4. Cancer (ராசி: கடகம்) 5. Leo (ராசி: சிம்மம்) 6. Virgo (ராசி: கன்னி)
-7. Libra (ராசி: துலாம்) 8. Scorpio (ராசி: விருச்சிகம்) 9. Sagittarius (ராசி: தனுசு)
-10. Capricorn (ராசி: மகரம்) 11. Aquarius (ராசி: கும்பம்) 12. Pisces (ராசி: மீனம்)
+PRODUCT LINKING:
+- When website content mentions a relevant page/service, naturally say "I can share the link to [service]"
+- Only mention links that are genuinely relevant to what the user asked
+- Don't force a link into every message
 
-CONFIDENTIAL EXCEPTION:
-If payment/billing/refund/account details asked -> say exactly:
-'Let me connect you with our specialist team.' and stop."""
+ACCURACY RULES:
+- Moon sign = Rashi (Vedic), NOT Sun sign (Western)
+- Nakshatra = birth star, one of 27 lunar mansions
+- Lagna = Ascendant (rising sign at birth time)
+- Dasha = planetary period system unique to Vedic astrology
+- Remedies include: gemstones, mantras, yantras, pujas, fasting, donations
+
+ZODIAC IN TAMIL (use when listing all 12 signs):
+Aries(மேஷம்) Taurus(ரிஷபம்) Gemini(மிதுனம்) Cancer(கடகம்) Leo(சிம்மம்) Virgo(கன்னி)
+Libra(துலாம்) Scorpio(விருச்சிகம்) Sagittarius(தனுசு) Capricorn(மகரம்) Aquarius(கும்பம்) Pisces(மீனம்)
+
+HANDOFF: If payment/billing/refund/account issue → say exactly:
+"Let me connect you with our specialist team." and stop."""
 
 TOPIC_FORCE_INSTRUCTION = """
 
@@ -202,6 +213,45 @@ class CloseSessionRequest(BaseModel):
 
 class SessionStartRequest(BaseModel):
     session_id: str; user_name: str = ""; user_email: str = ""; user_phone: str = ""
+    
+
+# Add this new endpoint
+@app.get("/agent/events")
+async def agent_events():
+    """SSE stream for dashboard — pushes new session alerts"""
+    async def event_stream():
+        last_count = 0
+        while True:
+            try:
+                conn = sqlite3.connect("chat.db")
+                rows = conn.execute(
+                    "SELECT session_id, user_name, status, updated_at FROM agent_sessions WHERE status IN ('waiting','with_agent') ORDER BY updated_at DESC"
+                ).fetchall()
+                conn.close()
+                count = len(rows)
+                if count != last_count:
+                    last_count = count
+                    data = json_lib.dumps({
+                        "type": "queue_update",
+                        "count": count,
+                        "sessions": [{"session_id":r[0],"user_name":r[1],"status":r[2],"updated_at":r[3]} for r in rows]
+                    })
+                    yield f"data: {data}\n\n"
+                else:
+                    yield f"data: {{\"type\":\"ping\"}}\n\n"
+            except Exception as e:
+                yield f"data: {{\"type\":\"error\",\"msg\":\"{str(e)}\"}}\n\n"
+            await asyncio.sleep(3)
+    
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        }
+    )
 
 @app.post("/session/start")
 async def session_start(req: SessionStartRequest):
@@ -789,7 +839,67 @@ tr:hover td{background:rgba(255,255,255,.018)}
 /* ── State ── */
 const API=window.location.origin;
 let agent='',activeSid=null,activeData=null,pollH=null,pollL=null,curTab='all',showAna=false,rpCurTab='user';
-let allSessions=[];
+let sseConn=null, lastQueueCount=0;
+
+// Notification sound (Web Audio API — no file needed)
+function playNotifSound(){
+  try{
+    const ctx=new(window.AudioContext||window.webkitAudioContext)();
+    [523,659,784].forEach((freq,i)=>{
+      const o=ctx.createOscillator(),g=ctx.createGain();
+      o.connect(g);g.connect(ctx.destination);
+      o.frequency.value=freq;o.type='sine';
+      g.gain.setValueAtTime(0,ctx.currentTime+i*0.12);
+      g.gain.linearRampToValueAtTime(0.18,ctx.currentTime+i*0.12+0.04);
+      g.gain.linearRampToValueAtTime(0,ctx.currentTime+i*0.12+0.18);
+      o.start(ctx.currentTime+i*0.12);
+      o.stop(ctx.currentTime+i*0.12+0.2);
+    });
+  }catch(e){}
+}
+
+function connectSSE(){
+  if(sseConn)sseConn.close();
+  sseConn=new EventSource(API+'/agent/events');
+  sseConn.onmessage=function(e){
+    try{
+      const d=JSON.parse(e.data);
+      if(d.type==='queue_update'){
+        if(d.count > lastQueueCount){
+          // New user entered queue!
+          playNotifSound();
+          const newOnes=d.sessions.slice(0, d.count - lastQueueCount);
+          newOnes.forEach(s=>{
+            toast('🔔 New chat: '+(s.user_name||'Anonymous'), 4000);
+          });
+          showDesktopNotif(d.count - lastQueueCount);
+        }
+        lastQueueCount=d.count;
+        // Update badge without full reload
+        document.getElementById('qbadge').textContent=d.count;
+      }
+    }catch(err){}
+  };
+  sseConn.onerror=function(){
+    // Reconnect after 5s if SSE drops
+    setTimeout(connectSSE, 5000);
+  };
+}
+
+function showDesktopNotif(count){
+  if(!('Notification' in window))return;
+  if(Notification.permission==='granted'){
+    new Notification('AstroVed Support',{
+      body: count+' new user'+(count>1?'s':'')+' waiting in queue!',
+      icon: '/favicon.ico',
+      tag: 'av-queue'
+    });
+  } else if(Notification.permission!=='denied'){
+    Notification.requestPermission().then(p=>{
+      if(p==='granted') showDesktopNotif(count);
+    });
+  }
+}
 
 /* ── Toast ── */
 function toast(m,ms=2600){const t=document.getElementById('toast');t.textContent=m;t.classList.add('on');setTimeout(()=>t.classList.remove('on'),ms);}
@@ -811,6 +921,12 @@ function enterApp(){
   document.getElementById('npill').textContent=agent;
   loadSessions();
   pollL=setInterval(loadSessions,4000);
+  connectSSE(); // ← SSE connection for instant notifications
+  // Request desktop notification permission on login
+  if('Notification' in window && Notification.permission==='default'){
+    Notification.requestPermission();
+  }
+}
 }
 function doLogout(){sessionStorage.clear();clearInterval(pollL);clearInterval(pollH);location.reload();}
 (function auto(){const a=sessionStorage.getItem('av_ag');if(a){agent=a;enterApp();}})();

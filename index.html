@@ -827,7 +827,7 @@ async function send() {
 }
 
 async function callAPI(txt, attempt = 0) {
-  await new Promise(r => setTimeout(r, 5000));
+  await new Promise(r => setTimeout(r, 800)); // reduced from 5000ms — faster response
   try {
     const res = await fetch(API + '/chat', {
       method: 'POST',
@@ -838,39 +838,19 @@ async function callAPI(txt, attempt = 0) {
     const d = await res.json();
     rmTyping();
     if (d.mode === 'with_agent') { startPolling(); return; }
-    if (d.mode === 'handoff_triggered') { botMsg(d.reply, []); startPolling(); return; }
-
-    const link = (d.topic_url && d.topic_label) ? { url: d.topic_url, label: d.topic_label } : null;
-    botMsg(d.reply || 'Please try again.', [], link);
-  } catch (e) {
-    if (attempt < 2) {
-      await new Promise(r => setTimeout(r, 5000));
-      await callAPI(txt, attempt + 1);
-    } else {
-      rmTyping();
-      botMsg('Server is waking up... Please resend your message in 30 seconds! 🔄', []);
+    if (d.mode === 'handoff_triggered') { 
+      botMsg(d.reply, []); 
+      startPolling(); 
+      return; 
     }
-  }
-}
-async function callAPI(txt, attempt = 0) {
-  await new Promise(r => setTimeout(r, 5000));
-  try {
-    const res = await fetch(API + '/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session_id: sessId, message: txt })
-    });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const d = await res.json();
-    rmTyping();
-    if (d.mode === 'with_agent') { startPolling(); return; }
-    if (d.mode === 'handoff_triggered') { botMsg(d.reply, []); startPolling(); return; }
-
-    let link = (d.topic_url && d.topic_label) ? { url: d.topic_url, label: d.topic_label } : getFallbackLink(txt);
+    // Use backend topic_url first, then fallback only if backend gave nothing
+    const link = (d.topic_url && d.topic_label) 
+      ? { url: d.topic_url, label: d.topic_label } 
+      : getFallbackLink(txt); // pass USER message, not bot reply
     botMsg(d.reply || 'Please try again.', [], link);
   } catch (e) {
     if (attempt < 2) {
-      await new Promise(r => setTimeout(r, 5000));
+      await new Promise(r => setTimeout(r, 4000));
       await callAPI(txt, attempt + 1);
     } else {
       rmTyping();
