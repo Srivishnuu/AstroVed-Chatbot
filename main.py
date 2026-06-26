@@ -417,10 +417,35 @@ async def agent_reply(req: AgentReplyRequest):
 async def agent_close(req: CloseSessionRequest):
     try:
         conn = sqlite3.connect("chat.db")
-        conn.execute("UPDATE agent_sessions SET status='closed', updated_at=CURRENT_TIMESTAMP WHERE session_id=?", (req.session_id,))
+        # Set status to 'closed' but KEEP all messages — never delete history
+        conn.execute(
+            "UPDATE agent_sessions SET status='closed', updated_at=CURRENT_TIMESTAMP WHERE session_id=?",
+            (req.session_id,)
+        )
         conn.commit(); conn.close()
-        save_message(req.session_id, "system", "Agent has ended this conversation")
+        save_message(req.session_id, "system", "Agent has ended this conversation. Chat history preserved.")
         return {"status": "closed"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@app.get("/agent/all-sessions")
+async def agent_all_sessions():
+    """Returns ALL sessions including closed ones for history view"""
+    try:
+        conn = sqlite3.connect("chat.db")
+        rows = conn.execute(
+            """SELECT session_id, user_name, user_email, user_phone, status, 
+               assigned_agent, issue_type, priority, updated_at
+               FROM agent_sessions 
+               ORDER BY updated_at DESC LIMIT 100"""
+        ).fetchall()
+        conn.close()
+        return {"sessions": [
+            {"session_id":r[0],"user_name":r[1],"user_email":r[2],
+             "user_phone":r[3],"status":r[4],"assigned_agent":r[5],
+             "issue_type":r[6],"priority":r[7],"updated_at":r[8]} 
+            for r in rows
+        ]}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -722,6 +747,7 @@ tr:hover td{background:rgba(255,255,255,.018)}
           <button class="sb-tab on" onclick="setTab('all',this)">All</button>
           <button class="sb-tab" onclick="setTab('waiting',this)">Waiting</button>
           <button class="sb-tab" onclick="setTab('with_agent',this)">Active</button>
+          <button class="sb-tab" onclick="setTab('closed',this)">History</button>
         </div>
       </div>
       <div class="sb-stats">
@@ -842,18 +868,47 @@ let agent='',activeSid=null,activeData=null,pollH=null,pollL=null,curTab='all',s
 let allSessions=[];
 let sseConn=null, lastQueueCount=0;
 
+// NEW USER notification — ascending chime (chatbot triggers this)
 function playNotifSound(){
   try{
     const ctx=new(window.AudioContext||window.webkitAudioContext)();
-    [523,659,784].forEach((freq,i)=>{
+    const notes=[
+      {f:440,t:0},{f:554,t:0.13},{f:659,t:0.26},{f:880,t:0.39}
+    ];
+    notes.forEach(({f,t})=>{
+      const o=ctx.createOscillator(),g=ctx.createGain(),r=ctx.createGain();
+      o.connect(g);g.connect(r);r.connect(ctx.destination);
+      o.frequency.value=f;o.type='triangle';
+      r.gain.value=0.22;
+      g.gain.setValueAtTime(0,ctx.currentTime+t);
+      g.gain.linearRampToValueAtTime(1,ctx.currentTime+t+0.03);
+      g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+t+0.28);
+      o.start(ctx.currentTime+t);
+      o.stop(ctx.currentTime+t+0.3);
+    });
+    // Low rumble for emphasis
+    const sub=ctx.createOscillator(),sg=ctx.createGain();
+    sub.connect(sg);sg.connect(ctx.destination);
+    sub.frequency.value=110;sub.type='sine';
+    sg.gain.setValueAtTime(0.08,ctx.currentTime);
+    sg.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+0.4);
+    sub.start(ctx.currentTime);sub.stop(ctx.currentTime+0.4);
+  }catch(e){}
+}
+
+// AGENT REPLY notification — two-tone ping (when agent sends message to chatbot)
+function playReplySound(){
+  try{
+    const ctx=new(window.AudioContext||window.webkitAudioContext)();
+    [{f:660,t:0},{f:880,t:0.15}].forEach(({f,t})=>{
       const o=ctx.createOscillator(),g=ctx.createGain();
       o.connect(g);g.connect(ctx.destination);
-      o.frequency.value=freq;o.type='sine';
-      g.gain.setValueAtTime(0,ctx.currentTime+i*0.12);
-      g.gain.linearRampToValueAtTime(0.18,ctx.currentTime+i*0.12+0.04);
-      g.gain.linearRampToValueAtTime(0,ctx.currentTime+i*0.12+0.18);
-      o.start(ctx.currentTime+i*0.12);
-      o.stop(ctx.currentTime+i*0.12+0.2);
+      o.frequency.value=f;o.type='sine';
+      g.gain.setValueAtTime(0,ctx.currentTime+t);
+      g.gain.linearRampToValueAtTime(0.2,ctx.currentTime+t+0.02);
+      g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+t+0.22);
+      o.start(ctx.currentTime+t);
+      o.stop(ctx.currentTime+t+0.25);
     });
   }catch(e){}
 }
@@ -928,18 +983,24 @@ function doLogout(){sessionStorage.clear();clearInterval(pollL);clearInterval(po
 
 /* ── Sessions ── */
 function loadSessions(){
+  // Load active queue
   fetch(API+'/agent/sessions').then(r=>r.json()).then(d=>{
-    allSessions=d.sessions||[];
-    document.getElementById('qbadge').textContent=allSessions.length;
-    document.getElementById('ss-w').textContent=allSessions.filter(s=>s.status==='waiting').length;
-    document.getElementById('ss-a').textContent=allSessions.filter(s=>s.status==='with_agent').length;
-    renderCards();
+    const active=d.sessions||[];
+    document.getElementById('qbadge').textContent=active.length;
+    document.getElementById('ss-w').textContent=active.filter(s=>s.status==='waiting').length;
+    document.getElementById('ss-a').textContent=active.filter(s=>s.status==='with_agent').length;
+    // Also load ALL sessions (including closed) for history tab
+    fetch(API+'/agent/all-sessions').then(r=>r.json()).then(all=>{
+      allSessions=all.sessions||[];
+      renderCards();
+    }).catch(()=>{allSessions=active;renderCards();});
   }).catch(()=>{});
 }
 
 function renderCards(){
   const q=document.getElementById('srch').value.toLowerCase();
-  let list=allSessions.filter(s=>{
+ let list=allSessions.filter(s=>{
+    if(curTab==='all'&&s.status==='closed')return false; // hide closed from 'All'
     if(curTab!=='all'&&s.status!==curTab)return false;
     if(q&&!(s.user_name||'').toLowerCase().includes(q)&&!(s.user_email||'').toLowerCase().includes(q))return false;
     return true;
@@ -1071,7 +1132,11 @@ function sendReply(){
   if(!msg||!activeSid)return;
   inp.value='';
   fetch(API+'/agent/reply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session_id:activeSid,agent_name:agent,message:msg})})
-    .then(loadHistory);
+    .then(()=>{
+      playReplySound(); // sound when agent sends reply
+      toast('✉️ Reply sent to user', 1800);
+      loadHistory();
+    });
 }
 function useQR(btn){
   const inp=document.getElementById('ri');

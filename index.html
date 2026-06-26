@@ -827,7 +827,7 @@ async function send() {
 }
 
 async function callAPI(txt, attempt = 0) {
-  await new Promise(r => setTimeout(r, 800)); // reduced from 5000ms — faster response
+  await new Promise(r => setTimeout(r, 200)); // reduced from 5000ms — faster response
   try {
     const res = await fetch(API + '/chat', {
       method: 'POST',
@@ -850,7 +850,7 @@ async function callAPI(txt, attempt = 0) {
     botMsg(d.reply || 'Please try again.', [], link);
   } catch (e) {
     if (attempt < 2) {
-      await new Promise(r => setTimeout(r, 4000));
+      await new Promise(r => setTimeout(r, 2000));
       await callAPI(txt, attempt + 1);
     } else {
       rmTyping();
