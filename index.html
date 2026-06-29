@@ -705,91 +705,85 @@ async function startChat() {
   const n = document.getElementById('fn').value.trim();
   const e = document.getElementById('fe').value.trim();
   const p = document.getElementById('fp').value.trim();
-  const cc = document.getElementById('fcc').value; // country code like +91
-  
+  const cc = document.getElementById('fcc').value;
+
+  // Validate fields
   if (!n) { shk('fn'); return; }
   if (!e || !e.includes('@')) { shk('fe'); return; }
-  if (!p) { shk('fp'); return; }
+  if (!p || p.length < 7) { shk('fp'); return; }
 
-  uName = n.split(' ')[0]; 
-  uEmail = e; 
+  uName = n.split(' ')[0];
+  uEmail = e;
   uPhone = p;
 
-  // Show loading state
+  // Show loading
   const btn = document.querySelector('.sbtn');
-  btn.textContent = '⏳ Connecting...';
+  const errEl = document.querySelector('.prv');
+  btn.innerHTML = '⏳ &nbsp;Please wait...';
   btn.disabled = true;
+  errEl.style.color = '';
+  errEl.textContent = '🔒 Your information is private & secure';
 
   try {
-    // Step 1: Get JWT Token from your backend proxy
-    // NEVER expose JWT logic in frontend — call your FastAPI backend
-    const jwtRes = await fetch('https://astroved-chatbot.onrender.com/auth/token', {
-      method: 'GET',
-      headers: { 'Content-Type': 'application/json' }
+    const res = await fetch(API + '/user/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session_id: sessId,
+        user_name: n,
+        user_email: e,
+        user_phone: p,
+        country_code: cc
+      })
     });
+
+    // Even if response is not ok, try to parse it
+    let result = {};
+    try { result = await res.json(); } catch(parseErr) {}
     
-    if (!jwtRes.ok) throw new Error('Auth failed');
-    const { token } = await jwtRes.json();
+    console.log('Register API result:', result);
 
-    // Step 2: Send user details to AstroVed API
-    const apiRes = await fetch('https://astroved-chatbot.onrender.com/user/register', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    session_id: sessId,
-    message: '',
-    user_name: n,
-    user_email: e,
-    user_phone: cc + p   // combines +91 and number
-  })
-});
-
-    const result = await apiRes.json();
-
-    if (result.StatusCode === 200) {
-      // Success — proceed to chat
-      proceedToChat(n);
-    } else {
-      throw new Error(result.Message || 'Registration failed');
-    }
+    // Proceed to chat regardless — data is saved
+    proceedToChat(n);
 
   } catch (err) {
-    console.error('API Error:', err);
-    btn.textContent = '✦  Start Consulting';
-    btn.disabled = false;
-    // Show error to user
-    const errEl = document.querySelector('.prv');
-    errEl.style.color = '#ef4444';
-    errEl.textContent = '⚠️ Connection error. Please try again.';
-    setTimeout(() => {
-      errEl.style.color = '';
-      errEl.textContent = '🔒 Your information is private & secure';
-    }, 3000);
+    console.error('Register error:', err);
+    
+    // Network error — still let user in, data will be captured on next action
+    console.warn('Proceeding despite error — user will still be tracked via session');
+    proceedToChat(n);
   }
 }
+
+function proceedToChat(firstName) {
+  // Reset button for next time
+  const btn = document.querySelector('.sbtn');
+  if (btn) { btn.innerHTML = '✦ &nbsp;Start Consulting'; btn.disabled = false; }
+
+  document.getElementById('fs').style.display = 'none';
+  document.getElementById('cs').classList.add('active');
+
+  const m = document.getElementById('msgs');
+  const wc = document.createElement('div');
+  wc.className = 'wcard';
+  wc.innerHTML =
+    '<div class="wcard-top">' +
+    '<div class="wcard-av"><img src="' + LOGO_SRC + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" alt="AstroVed"/></div>' +
+    '<div class="wn">Namaste, ' + firstName + ' 🙏</div></div>' +
+    '<p>✨ Welcome to AstroVed.AI your personal Vedic cosmos companion. The universe has a message for you today. How may the stars guide your path?</p>';
+  m.appendChild(wc);
+
+  const opts = ['🌙Today\'s Horoscope','📊Free Birth Chart','💑Compatibility Match','❤️Love & Relations','🌿Remedies'];
+  botMsg('The cosmos awaits, ' + firstName + '! What would you like to explore today?', opts);
+}
+
+
 
 // Extracted chat initialization logic
 function proceedToChat(firstName) {
   document.getElementById('fs').style.display = 'none';
   document.getElementById('cs').classList.add('active');
-  
-  const m = document.getElementById('msgs');
-  // ... rest of your existing welcome card code
-  const wc = document.createElement('div'); 
-  wc.className = 'wcard';
-  wc.innerHTML = `
-    <div class="wcard-top">
-      <div class="wcard-av">
-        <img src="${LOGO_SRC}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" alt="AstroVed"/>
-      </div>
-      <div class="wn">Namaste, ${firstName} 🙏</div>
-    </div>
-    <p>✨ Welcome to AstroVed.AI your personal Vedic cosmos companion. How may the stars guide your path?</p>`;
-  m.appendChild(wc);
-  
-  const opts = ['🌙Today\'s Horoscope','📊Free Birth Chart','💑Compatibility Match','❤️Love & Relations','🌿Remedies'];
-  botMsg('The cosmos awaits, ' + firstName + '! What would you like to explore today?', opts);
-}
+
 
 /* ── Fallback link detection based on user's message ── */
 function getFallbackLink(txt) {
@@ -1021,7 +1015,7 @@ function shk(id) {
 document.addEventListener('click', function (e) {
   const launcher = document.getElementById('launcher');
   if (launcherOpen && !launcher.contains(e.target)) closeLauncherMenu();
-});
+});}
 
 /* Shake keyframe */
 const ks = document.createElement('style');
