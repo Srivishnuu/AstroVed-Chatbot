@@ -770,20 +770,12 @@ function proceedToChat(firstName) {
     '<div class="wcard-top">' +
     '<div class="wcard-av"><img src="' + LOGO_SRC + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" alt="AstroVed"/></div>' +
     '<div class="wn">Namaste, ' + firstName + ' 🙏</div></div>' +
-    '<p>✨ Welcome to AstroVed.AI your personal Vedic cosmos companion. The universe has a message for you today. How may the stars guide your path?</p>';
+    '<p>✨ Welcome to AstroVed.AI — your personal Vedic cosmos companion. The universe has a message for you today. How may the stars guide your path?</p>';
   m.appendChild(wc);
 
   const opts = ['🌙Today\'s Horoscope','📊Free Birth Chart','💑Compatibility Match','❤️Love & Relations','🌿Remedies'];
   botMsg('The cosmos awaits, ' + firstName + '! What would you like to explore today?', opts);
 }
-
-
-
-// Extracted chat initialization logic
-function proceedToChat(firstName) {
-  document.getElementById('fs').style.display = 'none';
-  document.getElementById('cs').classList.add('active');
-
 
 /* ── Fallback link detection based on user's message ── */
 function getFallbackLink(txt) {
@@ -1015,7 +1007,7 @@ function shk(id) {
 document.addEventListener('click', function (e) {
   const launcher = document.getElementById('launcher');
   if (launcherOpen && !launcher.contains(e.target)) closeLauncherMenu();
-});}
+});
 
 /* Shake keyframe */
 const ks = document.createElement('style');
