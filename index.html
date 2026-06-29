@@ -755,13 +755,12 @@ async function startChat() {
   }
 }
 
-function proceedToChat(firstName) {
+
   // Reset button for next time
   const btn = document.querySelector('.sbtn');
   if (btn) { btn.innerHTML = '✦ &nbsp;Start Consulting'; btn.disabled = false; }
 
-  document.getElementById('fs').style.display = 'none';
-  document.getElementById('cs').classList.add('active');
+  
 
   const m = document.getElementById('msgs');
   const wc = document.createElement('div');
@@ -775,7 +774,7 @@ function proceedToChat(firstName) {
 
   const opts = ['🌙Today\'s Horoscope','📊Free Birth Chart','💑Compatibility Match','❤️Love & Relations','🌿Remedies'];
   botMsg('The cosmos awaits, ' + firstName + '! What would you like to explore today?', opts);
-}
+
 
 /* ── Fallback link detection based on user's message ── */
 function getFallbackLink(txt) {
