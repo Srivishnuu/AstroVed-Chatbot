@@ -11,6 +11,8 @@ from topic_map import TOPIC_MAP, match_topic
 from fastapi.responses import StreamingResponse
 import json as json_lib
 import asyncio
+import httpx
+import os
 
 load_dotenv()
 
@@ -1188,6 +1190,40 @@ function drawDonut(stats,total){
 </script>
 </body>
 </html>"""
+
+ASTROVED_API_BASE = "https://qawebservice.astroved.com/api"
+ASTROVED_JWT_TOKEN = os.getenv("ASTROVED_JWT_TOKEN")  # Store in .env file
+
+@app.get("/auth/token")
+async def get_auth_token():
+    """Proxy endpoint — never expose JWT to frontend directly"""
+    if not ASTROVED_JWT_TOKEN:
+        raise HTTPException(status_code=500, detail="Auth token not configured")
+    return {"token": ASTROVED_JWT_TOKEN}
+
+@app.post("/user/register")
+async def register_user(req: ChatRequest):
+    """Alternative: proxy the entire API call through backend"""
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{ASTROVED_API_BASE}/UserAccount/AddChatBotDetails",
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {ASTROVED_JWT_TOKEN}"
+                },
+                json={
+                    "CustomerName": req.user_name,
+                    "CurrencyCode": "INR",
+                    "CountryCode": "+91",
+                    "MobileNo": req.user_phone,
+                    "EmailAddress": req.user_email
+                },
+                timeout=10.0
+            )
+            return response.json()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/agent/dashboard", response_class=HTMLResponse)
 async def agent_dashboard_page():

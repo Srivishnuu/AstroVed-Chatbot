@@ -732,23 +732,17 @@ async function startChat() {
     const { token } = await jwtRes.json();
 
     // Step 2: Send user details to AstroVed API
-    const apiRes = await fetch(
-      'https://qawebservice.astroved.com/api/UserAccount/AddChatBotDetails',
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          CustomerName: n,
-          CurrencyCode: 'INR',       // or detect from country code
-          CountryCode: cc,            // e.g. +91
-          MobileNo: p,
-          EmailAddress: e
-        })
-      }
-    );
+    const apiRes = await fetch('https://astroved-chatbot.onrender.com/user/register', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    session_id: sessId,
+    message: '',
+    user_name: n,
+    user_email: e,
+    user_phone: cc + p   // combines +91 and number
+  })
+});
 
     const result = await apiRes.json();
 
