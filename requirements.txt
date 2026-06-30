@@ -12,11 +12,6 @@ DBUtils
 
 
 
-Ithu dhan ennoda entire code, ennana venalum pannikoo, okey... but namma konjam changes pannalam, okey va... 1. Ennoda chatbot kudukara answer accuracy ha irukanum rmba proper timing la replay varanum okey. 2. The ennoda UI dashboard normal dark theme la iruku namma konjam aadhan extra neon light and extra dashboard decorations, making it semma UI ha change pannalam, okey... Appadiye, logo um fix pannu
 
 
-Q: Chatbot reply timing/accuracy problem na exact issue enna?
-A: Replies late aagudhu (delay/lag)
 
-Q: Dashboard UI redesign - enna level ah pannanum?
-A: Full glow-up - glassmorphism, animations, premium feel
