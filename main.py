@@ -1244,6 +1244,7 @@ function drawDonut(stats,total){
 </html>"""
 
 # Add at top
+# Add at top
 import httpx
 
 ASTROVED_API_BASE = "https://qawebservice.astroved.com/api"
@@ -1371,9 +1372,8 @@ async def get_registrations():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-
-
+    
+    
 @app.get("/agent/dashboard", response_class=HTMLResponse)
 async def agent_dashboard_page():
     return AGENT_DASHBOARD_HTML

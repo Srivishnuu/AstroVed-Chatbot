@@ -589,52 +589,81 @@ document.addEventListener('click', function(e) {
 /* ─────────────────────────────────────
    FORM — START CHAT
 ───────────────────────────────────── */
-function startChat() {
-  var n  = document.getElementById('fn').value.trim();
-  var e  = document.getElementById('fe').value.trim();
-  var p  = document.getElementById('fp').value.trim();
-  var cc = document.getElementById('fcc').value;
+async function startChat() {
+  const n = document.getElementById('fn').value.trim();
+  const e = document.getElementById('fe').value.trim();
+  const p = document.getElementById('fp').value.trim();
+  const cc = document.getElementById('fcc').value;
 
-  if (!n)                { shk('fn'); return; }
-  if (!e||!e.includes('@')){ shk('fe'); return; }
-  if (!p||p.length < 7) { shk('fp'); return; }
+  // Validate fields
+  if (!n) { shk('fn'); return; }
+  if (!e || !e.includes('@')) { shk('fe'); return; }
+  if (!p || p.length < 7) { shk('fp'); return; }
 
-  uName  = n.split(' ')[0];
+  uName = n.split(' ')[0];
   uEmail = e;
   uPhone = p;
 
-  var btn   = document.getElementById('start-btn');
-  var prvEl = document.getElementById('prv-msg');
+  // Show loading
+  const btn = document.querySelector('.sbtn');
+  const errEl = document.querySelector('.prv');
   btn.innerHTML = '⏳ &nbsp;Please wait...';
-  btn.disabled  = true;
+  btn.disabled = true;
+  errEl.style.color = '';
+  errEl.textContent = '🔒 Your information is private & secure';
 
-setTimeout(function(){
-    btn.innerHTML = '✦ &nbsp;Start Consulting';
-    btn.disabled  = false;
-    proceedToChat(uName);
-  }, 600); }
-/* ─────────────────────────────────────
-   PROCEED TO CHAT
-───────────────────────────────────── */
+  try {
+    const res = await fetch(API + '/user/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session_id: sessId,
+        user_name: n,
+        user_email: e,
+        user_phone: p,
+        country_code: cc
+      })
+    });
+
+    // Even if response is not ok, try to parse it
+    let result = {};
+    try { result = await res.json(); } catch(parseErr) {}
+    
+    console.log('Register API result:', result);
+
+    // Proceed to chat regardless — data is saved
+    proceedToChat(n);
+
+  } catch (err) {
+    console.error('Register error:', err);
+    
+    // Network error — still let user in, data will be captured on next action
+    console.warn('Proceeding despite error — user will still be tracked via session');
+    proceedToChat(n);
+  }
+}
+
 function proceedToChat(firstName) {
+  // Reset button for next time
+  const btn = document.querySelector('.sbtn');
+  if (btn) { btn.innerHTML = '✦ &nbsp;Start Consulting'; btn.disabled = false; }
+
   document.getElementById('fs').style.display = 'none';
   document.getElementById('cs').classList.add('active');
 
-  var m  = document.getElementById('msgs');
-  var wc = document.createElement('div');
+  const m = document.getElementById('msgs');
+  const wc = document.createElement('div');
   wc.className = 'wcard';
   wc.innerHTML =
     '<div class="wcard-top">' +
     '<div class="wcard-av"><img src="' + LOGO_SRC + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" alt="AstroVed"/></div>' +
-    '<div class="wn">Namaste, ' + firstName + ' 🙏</div>' +
-    '</div>' +
-    '<p>✨ Welcome to AstroVed.AI your personal Vedic cosmos companion. How may the stars guide your path?</p>';
+    '<div class="wn">Namaste, ' + firstName + ' 🙏</div></div>' +
+    '<p>✨ Welcome to AstroVed.AI — your personal Vedic cosmos companion. The universe has a message for you today. How may the stars guide your path?</p>';
   m.appendChild(wc);
 
-  var opts = ['🌙Today\'s Horoscope','📊Free Birth Chart','💑Compatibility Match','❤️Love & Relations','🌿Remedies'];
-  botMsg('The cosmos awaits, ' + firstName + '! What would you like to explore today?', opts, null);
+  const opts = ['🌙Today\'s Horoscope','📊Free Birth Chart','💑Compatibility Match','❤️Love & Relations','🌿Remedies'];
+  botMsg('The cosmos awaits, ' + firstName + '! What would you like to explore today?', opts);
 }
-
 /* ─────────────────────────────────────
    CLEAN MARKDOWN
 ───────────────────────────────────── */
