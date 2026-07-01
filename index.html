@@ -800,8 +800,8 @@ function callAPI(txt, attempt) {
     })
     .then(function(d){
       rmTyping();
-      if (d.mode === 'with_agent')       { startPolling(); return; }
-      if (d.mode === 'handoff_triggered'){ botMsg(d.reply, [], null); startPolling(); return; }
+      if (d.mode === 'with_agent')       { syncThenPoll(); return; }         // ← changed
+      if (d.mode === 'handoff_triggered'){ botMsg(d.reply, [], null); syncThenPoll(); return; } // ← changed
       var link = (d.topic_url && d.topic_label)
         ? { url: d.topic_url, label: d.topic_label }
         : getFallbackLink(txt);
@@ -920,6 +920,20 @@ function restart() {
 /* ─────────────────────────────────────
    CRM PANEL
 ───────────────────────────────────── */
+function syncThenPoll() {
+  if (pollTimer) return; // already polling
+  // Silently fetch current max message ID — don't display anything
+  fetch(API + '/poll/' + sessId + '?since_id=' + lastMsgId)
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (d.messages && d.messages.length) {
+        d.messages.forEach(function(m){ lastMsgId = Math.max(lastMsgId, m.id); });
+      }
+      startPolling();
+    })
+    .catch(function(){ startPolling(); });
+} 
+
 function showCRM() {
   document.getElementById('cs').classList.remove('active');
   document.getElementById('crm-panel').classList.add('active');
@@ -932,7 +946,7 @@ function showCRM() {
       issue_type: 'support_request', priority: 'normal'
     })
   }).catch(function(){});
-  startPolling();
+  syncThenPoll(); // ← was startPolling(), now syncs first
 }
 
 function backChat() {
