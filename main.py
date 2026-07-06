@@ -1236,6 +1236,15 @@ async def get_registrations():
 @app.get("/agent/dashboard", response_class=HTMLResponse)
 async def agent_dashboard_page():
     return AGENT_DASHBOARD_HTML
+  
+  
+from fastapi.responses import Response
+
+@app.get("/widget.js")
+async def serve_widget():
+    with open("widget_content.js", "r", encoding="utf-8") as f:
+        content = f.read()
+    return Response(content=content, media_type="application/javascript")
 
 @app.get("/")
 def root():
