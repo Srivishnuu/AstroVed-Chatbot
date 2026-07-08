@@ -687,36 +687,30 @@ setTimeout(function(){
 
   /* ── CRM Panel ── */
   function showCRM(){
-    // FIX: stay inside the chat window — post the contact options as a message
-    // instead of switching to the separate #av-crm-panel screen.
-    var m = $('av-msgs');
-    var row = document.createElement('div');
-    row.className = 'av-mrow av-bot';
-    row.innerHTML =
-      '<div class="av-av av-bot"><img src="'+LOGO_SRC+'" alt="bot"/></div>' +
-      '<div class="av-bbl av-bot">' +
-        '🎧 <strong>Connect with Our Team</strong><br>Choose how you\'d like to reach us:' +
-        '<div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">' +
-          '<a class="av-link-btn" style="justify-content:center" href="https://api.whatsapp.com/send?phone=919677391109&text='+encodeURIComponent('Hello, I need assistance.')+'" target="_blank" rel="noopener">💬 WhatsApp — +91 96773 91109</a>' +
-          '<a class="av-link-btn" style="justify-content:center" href="mailto:support@astroved.com">✉️ Email — support@astroved.com</a>' +
-          '<a class="av-link-btn" style="justify-content:center" href="tel:+919677391108">📞 Call — +91 96773 91108</a>' +
-        '</div>' +
-      '</div>';
-    m.appendChild(row); scrl();
+  var m = document.getElementById('msgs');  // $ → document.getElementById
+  var row = document.createElement('div');
+  row.className = 'mrow bot';
+  row.innerHTML =
+    '<div class="av bot"><img src="'+LOGO_SRC+'" alt="bot"/></div>' +
+    '<div class="bbl bot">' +
+      '🎧 <strong>Connect with Our Team</strong><br>Choose how you\'d like to reach us:' +
+      '<div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">' +
+        '<a class="link-btn" style="justify-content:center" href="https://api.whatsapp.com/send?phone=919677391109&text='+encodeURIComponent('Hello, I need assistance.')+'" target="_blank" rel="noopener">💬 WhatsApp — +91 96773 91109</a>' +
+        '<a class="link-btn" style="justify-content:center" href="mailto:support@astroved.com">✉️ Email — support@astroved.com</a>' +
+        '<a class="link-btn" style="justify-content:center" href="tel:+919677391108">📞 Call — +91 96773 91108</a>' +
+      '</div>' +
+    '</div>';
+  m.appendChild(row);
+  scrl();
 
-    fetch(API+'/handoff',{
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({session_id:sessId, user_name:uName,
-        user_email:uEmail, user_phone:uPhone, issue_type:'support_request', priority:'normal'})
-    })
-    .then(function(r){
-      if(!r.ok){ console.error('Handoff failed:', r.status); }
-      return r.json();
-    })
-    .then(function(d){ console.log('Handoff response:', d); })
-    .catch(function(e){ console.error('Handoff network error:', e); });
-    syncThenPoll();}
-
+  fetch(API+'/handoff',{
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({session_id:sessId, user_name:uName,
+      user_email:uEmail, user_phone:uPhone, issue_type:'support_request', priority:'normal'})
+  }).catch(function(){});
+  syncThenPoll();
+}
+    
   function backChat(){
     $('av-crm-panel').classList.remove('av-active');
     $('av-cs').classList.add('av-active');
