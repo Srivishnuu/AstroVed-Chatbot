@@ -595,54 +595,27 @@ async function startChat() {
   const p = document.getElementById('fp').value.trim();
   const cc = document.getElementById('fcc').value;
 
-  // Validate fields
   if (!n) { shk('fn'); return; }
   if (!e || !e.includes('@')) { shk('fe'); return; }
   if (!p || p.length < 7) { shk('fp'); return; }
 
-  uName = n.split(' ')[0];
-  uEmail = e;
-  uPhone = p;
+  uName = n.split(' ')[0]; uEmail = e; uPhone = p;
 
-  // Show loading
-  const btn = document.querySelector('.sbtn');
-  const errEl = document.querySelector('.prv');
-  btn.innerHTML = '⏳ &nbsp;Please wait...';
-  btn.disabled = true;
-  errEl.style.color = '';
-  errEl.textContent = '🔒 Your information is private & secure';
+  // ✅ proceed immediately
+  proceedToChat(n);
 
-  try {
-    const res = await fetch(API + '/user/register', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        session_id: sessId,
-        user_name: n,
-        user_email: e,
-        user_phone: p,
-        country_code: cc
-      })
-    });
-
-    // Even if response is not ok, try to parse it
-    let result = {};
-    try { result = await res.json(); } catch(parseErr) {}
-    
-    console.log('Register API result:', result);
-
-    // Proceed to chat regardless — data is saved
-    proceedToChat(n);
-
-  } catch (err) {
-    console.error('Register error:', err);
-    
-    // Network error — still let user in, data will be captured on next action
-    console.warn('Proceeding despite error — user will still be tracked via session');
-    proceedToChat(n);
-  }
+  // registration happens silently in background
+  fetch(API + '/user/register', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ session_id: sessId, user_name: n, user_email: e, user_phone: p, country_code: cc })
+  }).catch(err => console.warn('Register failed silently:', err));
 }
 
+ 
+
+    // Even if response is not ok, try to parse it
+    
 function proceedToChat(firstName) {
   // Reset button for next time
   const btn = document.querySelector('.sbtn');
@@ -753,16 +726,13 @@ function scrl() {
 function getFallbackLink(txt) {
   var t = (txt || '').toLowerCase();
   if (t.includes('horoscope')||t.includes('moon sign')) return { label:'🌙 View Horoscope', url: SITE+'/horoscopes' };
-  if (t.includes('birth chart')||t.includes('kundli'))  return { label:'📊 Birth Chart',    url: SITE+'/astropedia/en/freetools/birth-chart' };
-  if (t.includes('compatibility')||t.includes('match')) return { label:'💑 Compatibility',  url: SITE+'/astropedia/en/freetools/horoscope-matching' };
-  if (t.includes('gemstone'))   return { label:'💎 Gemstones',    url: SITE+'/astropedia/en/freetools/gemstone' };
-  if (t.includes('yantra'))     return { label:'🔱 Yantras',      url: SITE+'/remedies/yantra' };
-  if (t.includes('puja')||t.includes('homa')) return { label:'🪔 Pujas & Homas', url: SITE+'/fire-lab-homa' };
-  if (t.includes('numerology')) return { label:'🔢 Numerology',   url: SITE+'/astropedia/en/freetools/numerology' };
-  if (t.includes('career'))     return { label:'💼 Career',        url: SITE+'/career-money/career-money-astrology' };
-  if (t.includes('love')||t.includes('marriage')) return { label:'❤️ Love & Relationships', url: SITE+'/love-marriage/love-and-relationship' };
-  if (t.includes('remed'))      return { label:'🌿 Remedies',      url: SITE+'/dosha-pariharam/' };
+  // ... existing checks stay same ...
   if (t.includes('consult'))    return { label:'🔮 Talk to Astrologer', url: SITE+'/astrovedspeaks/' };
+
+  // NEW — last-resort catch-all so a link is ALWAYS shown for real questions
+  if (t.trim().split(' ').length > 3) {
+    return { label:'✨ Explore All Services', url: SITE+'/astrology-services' };
+  }
   return null;
 }
 

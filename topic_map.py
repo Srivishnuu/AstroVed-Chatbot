@@ -873,6 +873,12 @@ TOPIC_MAP = {
         "url": f"{SITE}/astrology-services",
         "label": "✨ All AstroVed Services",
     },
+    
+    "new_service_name": {
+    "keywords": ["keyword1", "keyword2", "service name"],
+    "url": f"{SITE}/new-page-url",
+    "label": "🆕 New Service Name",
+},
 }
 
 
@@ -988,3 +994,4 @@ if __name__ == "__main__":
         print(f"{'✅' if ok else '❌'} {q!r:50s} → {label}")
     print(f"\n{'='*60}")
     print(f"Result: {passed}/{len(tests)} passed")
+    

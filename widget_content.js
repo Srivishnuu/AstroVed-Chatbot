@@ -477,22 +477,19 @@ setTimeout(function(){
     el.style.animation='av-shk .4s ease';
     setTimeout(function(){ el.style.borderColor=''; el.style.animation=''; },800);
   }
+  
+  function getFallbackLink(txt) {
+  var t = (txt || '').toLowerCase();
+  if (t.includes('horoscope')||t.includes('moon sign')) return { label:'🌙 View Horoscope', url: SITE+'/horoscopes' };
+  // ... existing checks stay same ...
+  if (t.includes('consult'))    return { label:'🔮 Talk to Astrologer', url: SITE+'/astrovedspeaks/' };
 
-  function getFallbackLink(txt){
-    var t=(txt||'').toLowerCase();
-    if(t.includes('horoscope')||t.includes('moon sign')) return {label:'🌙 View Horoscope',url:SITE+'/horoscopes'};
-    if(t.includes('birth chart')||t.includes('kundli'))  return {label:'📊 Birth Chart',url:SITE+'/astropedia/en/freetools/birth-chart'};
-    if(t.includes('compatibility')||t.includes('match')) return {label:'💑 Compatibility',url:SITE+'/astropedia/en/freetools/horoscope-matching'};
-    if(t.includes('gemstone')) return {label:'💎 Gemstones',url:SITE+'/astropedia/en/freetools/gemstone'};
-    if(t.includes('yantra'))   return {label:'🔱 Yantras',url:SITE+'/remedies/yantra'};
-    if(t.includes('puja')||t.includes('homa')) return {label:'🪔 Pujas & Homas',url:SITE+'/fire-lab-homa'};
-    if(t.includes('numerology')) return {label:'🔢 Numerology',url:SITE+'/astropedia/en/freetools/numerology'};
-    if(t.includes('career'))   return {label:'💼 Career',url:SITE+'/career-money/career-money-astrology'};
-    if(t.includes('love')||t.includes('marriage')) return {label:'❤️ Love',url:SITE+'/love-marriage/love-and-relationship'};
-    if(t.includes('remed'))    return {label:'🌿 Remedies',url:SITE+'/dosha-pariharam/'};
-    if(t.includes('consult'))  return {label:'🔮 Talk to Astrologer',url:SITE+'/astrovedspeaks/'};
-    return null;
+  // NEW — last-resort catch-all so a link is ALWAYS shown for real questions
+  if (t.trim().split(' ').length > 3) {
+    return { label:'✨ Explore All Services', url: SITE+'/astrology-services' };
   }
+  return null;
+}
 
   /* ── Bot Message ── */
   function botMsg(txt, opts, link){
@@ -576,24 +573,25 @@ setTimeout(function(){
 
   /* ── Start Chat (Form Submit) ── */
   function startChat(){
-    var n=$('av-fn').value.trim();
-    var e=$('av-fe').value.trim();
-    var p=$('av-fp').value.trim();
-    var cc=$('av-fcc').value;
-    if(!n){ shk('av-fn'); return; }
-    if(!e||!e.includes('@')){ shk('av-fe'); return; }
-    if(!p||p.length<7){ shk('av-fp'); return; }
+  var n=$('av-fn').value.trim();
+  var e=$('av-fe').value.trim();
+  var p=$('av-fp').value.trim();
+  var cc=$('av-fcc').value;
+  if(!n){ shk('av-fn'); return; }
+  if(!e||!e.includes('@')){ shk('av-fe'); return; }
+  if(!p||p.length<7){ shk('av-fp'); return; }
 
-    uName=n.split(' ')[0]; uEmail=e; uPhone=p;
-    var btn=$('av-start-btn');
-    btn.innerHTML='⏳ &nbsp;Please wait...'; btn.disabled=true;
+  uName=n.split(' ')[0]; uEmail=e; uPhone=p;
 
-    fetch(API+'/user/register',{
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({session_id:sessId,user_name:n,user_email:e,user_phone:p,country_code:cc})
-    }).catch(function(){});
-  }
+  // ✅ go to chat immediately, don't wait for the API
+  proceedToChat(uName);
 
+  // fire-and-forget registration
+  fetch(API+'/user/register',{
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({session_id:sessId,user_name:n,user_email:e,user_phone:p,country_code:cc})
+  }).catch(function(){});
+}
   function proceedToChat(firstName){
     var btn=$('av-start-btn');
     if(btn){ btn.innerHTML='✦ &nbsp;Start Consulting'; btn.disabled=false; }

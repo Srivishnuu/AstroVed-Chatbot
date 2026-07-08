@@ -1,11 +1,19 @@
 """
-AstroVed.AI — Sitemap-based Website Scraper
+AstroVed.AI — Sitemap-based Website Scraper (INCREMENTAL MODE)
 Uses sitemap.xml to get ALL page URLs (parent + child pages) safely.
 NO recursion crawling. NO infinite date-loop. NO crash.
+
+INCREMENTAL BEHAVIOUR (new):
+- Reads existing all_urls.txt + knowledge_base.txt (old data) first.
+- Compares against the fresh sitemap to find ONLY new URLs.
+- Scrapes ONLY the new URLs (fast, doesn't re-hit the whole site daily).
+- APPENDS new content to knowledge_base.txt and all_urls.txt.
+- Old data is never deleted or overwritten — only added to.
 """
 
 import requests
 from bs4 import BeautifulSoup
+import os
 import time
 import re
 
@@ -13,6 +21,9 @@ BASE_URL = "https://www.astroved.com"
 SITEMAP_URL = "https://www.astroved.com/sitemaps/astroved-sitemap.xml"
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+
+ALL_URLS_FILE = "all_urls.txt"
+KB_FILE = "knowledge_base.txt"
 
 # ── Skip patterns — daily/weekly/monthly horoscope DATE pages (infinite combos) ──
 SKIP_PATTERNS = [
@@ -104,47 +115,83 @@ def scrape_page_content(url):
         return None, []
 
 
+def load_existing_urls():
+    """Load URLs that were already scraped in previous runs (from all_urls.txt)."""
+    if not os.path.exists(ALL_URLS_FILE):
+        return set()
+    with open(ALL_URLS_FILE, "r", encoding="utf-8") as f:
+        return set(line.strip() for line in f if line.strip())
+
+
 def main():
     print("=" * 60)
     print("Step 1: Reading sitemap.xml ...")
     print("=" * 60)
 
-    all_urls = get_all_sitemap_urls(SITEMAP_URL)
-    all_urls = sorted(set(all_urls))  # dedupe
+    sitemap_urls = get_all_sitemap_urls(SITEMAP_URL)
+    sitemap_urls = sorted(set(sitemap_urls))  # dedupe
+    print(f"\nTotal unique URLs found in sitemap (after skipping date-horoscope pages): {len(sitemap_urls)}\n")
 
-    print(f"\nTotal unique URLs found (after skipping date-horoscope pages): {len(all_urls)}\n")
-
-    if not all_urls:
+    if not sitemap_urls:
         print("No URLs found! Check if sitemap.xml exists at:", SITEMAP_URL)
         return
 
-    # Save URL list for review before scraping content
-    with open("all_urls.txt", "w", encoding="utf-8") as f:
-        f.write("\n".join(all_urls))
-    print("Saved full URL list to all_urls.txt — review it before running content scrape!\n")
-
     print("=" * 60)
-    print("Step 2: Scraping content from each page...")
+    print("Step 2: Comparing against previously scraped URLs...")
     print("=" * 60)
 
-    all_text = []
-    success_count = 0
+    existing_urls = load_existing_urls()
+    print(f"Previously scraped URLs on record: {len(existing_urls)}")
 
-    for i, url in enumerate(all_urls, 1):
-        print(f"[{i}/{len(all_urls)}] Scraping: {url}")
-        title, lines = scrape_page_content(url)
-        if lines:
-            all_text.append(f"\n--- PAGE: {title} ({url}) ---\n")
-            all_text.extend(lines)
-            success_count += 1
-        time.sleep(0.4)  # polite delay so we don't hammer the server
+    new_urls = [u for u in sitemap_urls if u not in existing_urls]
+    print(f"NEW URLs found this run: {len(new_urls)}\n")
 
-    with open("knowledge_base.txt", "w", encoding="utf-8") as f:
-        f.write("\n".join(all_text))
+    if not new_urls:
+        print("No new pages found today — knowledge_base.txt stays unchanged.")
+        return
+
+    for u in new_urls:
+        print(f"  + NEW: {u}")
 
     print("\n" + "=" * 60)
-    print(f"DONE! Scraped {success_count}/{len(all_urls)} pages successfully")
-    print(f"Saved to knowledge_base.txt")
+    print("Step 3: Scraping content from NEW pages only...")
+    print("=" * 60)
+
+    new_text_chunks = []
+    success_count = 0
+    successfully_scraped_urls = []
+
+    for i, url in enumerate(new_urls, 1):
+        print(f"[{i}/{len(new_urls)}] Scraping: {url}")
+        title, lines = scrape_page_content(url)
+        if lines:
+            new_text_chunks.append(f"\n--- PAGE: {title} ({url}) ---\n")
+            new_text_chunks.extend(lines)
+            success_count += 1
+            successfully_scraped_urls.append(url)
+        else:
+            # Page failed to scrape — don't mark it as "seen" so we retry
+            # it again on the next run instead of silently skipping forever.
+            print(f"  Skipped (no content) — will retry next run: {url}")
+        time.sleep(0.4)  # polite delay so we don't hammer the server
+
+    if not new_text_chunks:
+        print("\nAll new URLs failed to scrape — nothing to append this run.")
+        return
+
+    # ── APPEND (never overwrite) new content to knowledge_base.txt ──
+    with open(KB_FILE, "a", encoding="utf-8") as f:
+        f.write("\n".join(new_text_chunks))
+        f.write("\n")
+
+    # ── APPEND newly-successful URLs to all_urls.txt so they aren't re-scraped ──
+    with open(ALL_URLS_FILE, "a", encoding="utf-8") as f:
+        f.write("\n".join(successfully_scraped_urls))
+        f.write("\n")
+
+    print("\n" + "=" * 60)
+    print(f"DONE! Added {success_count}/{len(new_urls)} new pages")
+    print(f"knowledge_base.txt and all_urls.txt updated (old data preserved)")
     print("=" * 60)
 
 

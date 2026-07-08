@@ -329,10 +329,13 @@ async def chat(req: ChatRequest):
             save_message(req.session_id, "assistant", reply)
             return {"reply": reply, "mode": "handoff_triggered", "topic_url": None, "topic_label": None}
         detected_lang = detect_language(req.message)
-        topic_key  = match_topic(req.message)
-        topic_info = TOPIC_MAP.get(topic_key) if topic_key else None
-        topic_url  = topic_info["url"]   if topic_info else None
-        topic_label= topic_info["label"] if topic_info else None
+        topic_url, topic_label = match_topic(req.message)      # ← changed
+        topic_info = None
+        if topic_label:
+            for _k, _v in TOPIC_MAP.items():
+                if _v["label"] == topic_label:
+                    topic_info = _v
+                    break
         system_content = BASE_SYSTEM_PROMPT + LANGUAGE_INSTRUCTIONS.get(detected_lang, LANGUAGE_INSTRUCTIONS["english"])
         if topic_info:
             url_fragment = topic_info["url"].replace(SITE,"").strip("/").split("/")[0]
