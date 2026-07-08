@@ -758,28 +758,55 @@ function send() {
 }
 
 function callAPI(txt, attempt) {
-  setTimeout(function(){
+  var controller = new AbortController();
+  var timeout = setTimeout(function() {
+    controller.abort();
+  }, 15000); // 15 sec timeout
+
+  setTimeout(function() {
     fetch(API + '/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session_id: sessId, message: txt })
+      signal: controller.signal, // ← AbortController signal
+      body: JSON.stringify({
+        session_id: sessId,
+        message: txt
+      })
     })
-    .then(function(res){
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      return res.json();
+    .then(function(r) {
+      clearTimeout(timeout);
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
     })
-    .then(function(d){
+    .then(function(d) {
       rmTyping();
-      if (d.mode === 'with_agent')       { syncThenPoll(); return; }         // ← changed
-      if (d.mode === 'handoff_triggered'){ botMsg(d.reply, [], null); syncThenPoll(); return; } // ← changed
+      if (d.mode === 'with_agent') { syncThenPoll(); return; }
+      if (d.mode === 'handoff_triggered') {
+        botMsg(d.reply, [], null);
+        syncThenPoll();
+        return;
+      }
       var link = (d.topic_url && d.topic_label)
         ? { url: d.topic_url, label: d.topic_label }
         : getFallbackLink(txt);
       botMsg(d.reply || 'Please try again.', [], link);
     })
-    .catch(function(err){
+    .catch(function(err) {
+      clearTimeout(timeout);
+      // Ignore Chrome extension interference errors
+      if (err.name === 'AbortError' || 
+          err.message.includes('message channel closed') ||
+          err.message.includes('listener indicated')) {
+        if (attempt < 2) {
+          setTimeout(function() { callAPI(txt, attempt + 1); }, 2000);
+        } else {
+          rmTyping();
+          botMsg('Connection issue. Please try again! 🔄', [], null);
+        }
+        return;
+      }
       if (attempt < 2) {
-        setTimeout(function(){ callAPI(txt, attempt + 1); }, 2000);
+        setTimeout(function() { callAPI(txt, attempt + 1); }, 2000);
       } else {
         rmTyping();
         botMsg('Server is waking up… Please resend in 30 seconds! 🔄', [], null);
@@ -787,6 +814,9 @@ function callAPI(txt, attempt) {
     });
   }, 200);
 }
+
+
+      
 
 /* ─────────────────────────────────────
    POLLING (Live Agent)
@@ -910,31 +940,49 @@ function syncThenPoll() {
     .catch(function(){ startPolling(); });
 } 
 
-function showCRM(){
-  // Stay inside the chat — post an inline contact card instead of switching screens
-  var m = $('av-msgs');
+function showCRM() {
+  // FIX: use getElementById — no jQuery on this page
+  var m = document.getElementById('msgs');
+  if (!m) return;
+
   var row = document.createElement('div');
-  row.className = 'av-mrow av-bot';
+  row.className = 'mrow bot';
   row.innerHTML =
-    '<div class="av-av av-bot"><img src="'+LOGO_SRC+'" alt="bot"/></div>' +
-    '<div class="av-bbl av-bot">' +
-      '🎧 <strong>Connect with Our Team</strong><br>Choose how you\'d like to reach us:' +
+    '<div class="av bot"><img src="' + LOGO_SRC + '" alt="bot"/></div>' +
+    '<div class="bbl bot">' +
+      '🎧 <strong>Connect with Our Team</strong><br>' +
+      'Choose how you\'d like to reach us:' +
       '<div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">' +
-        '<a class="av-link-btn" style="justify-content:center" href="https://api.whatsapp.com/send?phone=919677391109&text='+encodeURIComponent('Hello, I need assistance.')+'" target="_blank" rel="noopener">💬 WhatsApp — +91 96773 91109</a>' +
-        '<a class="av-link-btn" style="justify-content:center" href="mailto:support@astroved.com">✉️ Email — support@astroved.com</a>' +
-        '<a class="av-link-btn" style="justify-content:center" href="tel:+919677391108">📞 Call — +91 96773 91108</a>' +
+        '<a class="link-btn" style="justify-content:center" href="https://api.whatsapp.com/send?phone=919677391109&text=Hello%2C%20I%20need%20assistance." target="_blank" rel="noopener">💬 WhatsApp — +91 96773 91109</a>' +
+        '<a class="link-btn" style="justify-content:center" href="mailto:support@astroved.com">✉️ Email — support@astroved.com</a>' +
+        '<a class="link-btn" style="justify-content:center" href="tel:+919677391108">📞 Call — +91 96773 91108</a>' +
       '</div>' +
     '</div>';
-  m.appendChild(row); scrl();
+  m.appendChild(row);
+  scrl();
 
-  fetch(API+'/handoff',{
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({session_id:sessId, user_name:uName,
-      user_email:uEmail, user_phone:uPhone, issue_type:'support_request', priority:'normal'})
-  }).catch(function(){});
+  // Trigger dashboard notification
+  fetch(API + '/handoff', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      session_id: sessId,
+      user_name:  uName,
+      user_email: uEmail,
+      user_phone: uPhone,
+      issue_type: 'support_request',
+      priority:   'normal'
+    })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(d) { console.log('Handoff OK', d); })
+  .catch(function(e) { console.error('Handoff error', e); });
+
   syncThenPoll();
 }
 
+
+  
 function backChat() {
   document.getElementById('crm-panel').classList.remove('active');
   document.getElementById('cs').classList.add('active');
