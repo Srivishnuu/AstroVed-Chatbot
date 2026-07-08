@@ -372,7 +372,7 @@
           <button id="av-vbtn" aria-label="Voice input">
             <svg viewBox="0 0 24 24"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm-1-9c0-.55.45-1 1-1s1 .45 1 1v6c0 .55-.45 1-1 1s-1-.45-1-1V5zm6 6c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>
           </button>
-          <textarea id="av-inp" placeholder="Type your question here..." rows="1"></textarea>
+          <textarea id="av-inp" placeholder="Ask your question here" rows="1"></textarea>
           <button id="av-send-btn" aria-label="Send">
             <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
           </button>
@@ -687,8 +687,23 @@ setTimeout(function(){
 
   /* ── CRM Panel ── */
   function showCRM(){
-    $('av-cs').classList.remove('av-active');
-    $('av-crm-panel').classList.add('av-active');
+    // FIX: stay inside the chat window — post the contact options as a message
+    // instead of switching to the separate #av-crm-panel screen.
+    var m = $('av-msgs');
+    var row = document.createElement('div');
+    row.className = 'av-mrow av-bot';
+    row.innerHTML =
+      '<div class="av-av av-bot"><img src="'+LOGO_SRC+'" alt="bot"/></div>' +
+      '<div class="av-bbl av-bot">' +
+        '🎧 <strong>Connect with Our Team</strong><br>Choose how you\'d like to reach us:' +
+        '<div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">' +
+          '<a class="av-link-btn" style="justify-content:center" href="https://api.whatsapp.com/send?phone=919677391109&text='+encodeURIComponent('Hello, I need assistance.')+'" target="_blank" rel="noopener">💬 WhatsApp — +91 96773 91109</a>' +
+          '<a class="av-link-btn" style="justify-content:center" href="mailto:support@astroved.com">✉️ Email — support@astroved.com</a>' +
+          '<a class="av-link-btn" style="justify-content:center" href="tel:+919677391108">📞 Call — +91 96773 91108</a>' +
+        '</div>' +
+      '</div>';
+    m.appendChild(row); scrl();
+
     fetch(API+'/handoff',{
       method:'POST', headers:{'Content-Type':'application/json'},
       body:JSON.stringify({session_id:sessId, user_name:uName,
