@@ -708,9 +708,14 @@ setTimeout(function(){
       method:'POST', headers:{'Content-Type':'application/json'},
       body:JSON.stringify({session_id:sessId, user_name:uName,
         user_email:uEmail, user_phone:uPhone, issue_type:'support_request', priority:'normal'})
-    }).catch(function(){});
-    syncThenPoll();
-  }
+    })
+    .then(function(r){
+      if(!r.ok){ console.error('Handoff failed:', r.status); }
+      return r.json();
+    })
+    .then(function(d){ console.log('Handoff response:', d); })
+    .catch(function(e){ console.error('Handoff network error:', e); });
+    syncThenPoll();}
 
   function backChat(){
     $('av-crm-panel').classList.remove('av-active');
