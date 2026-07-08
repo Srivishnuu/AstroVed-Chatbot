@@ -791,22 +791,28 @@ function callAPI(txt, attempt) {
 /* ─────────────────────────────────────
    POLLING (Live Agent)
 ───────────────────────────────────── */
-function startPolling() {
+function startPolling(){
   if (pollTimer) return;
-  pollTimer = setInterval(function(){
+  pollTimer = setInterval(function () {
     fetch(API + '/poll/' + sessId + '?since_id=' + lastMsgId)
-      .then(function(r){ return r.json(); })
-      .then(function(d){
-        d.messages.forEach(function(m){
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        d.messages.forEach(function (m) {
           lastMsgId = Math.max(lastMsgId, m.id);
-          if (m.role === 'assistant') botMsg(m.content, [], null);
-          else if (m.role === 'system') botMsg('🔔 ' + m.content, [], null);
+          if (m.role === 'assistant') {
+            botMsg(m.content, [], null);
+          } else if (m.role === 'system') {
+            // FIX: don't show the internal "Handoff requested" log to the user —
+            // only show meaningful agent-facing events like join/close.
+            if (m.content.indexOf('Handoff requested') === -1) {
+              botMsg('🔔 ' + m.content, [], null);
+            }
+          }
         });
-        if (d.status === 'closed' || d.status === 'bot'){
+        if (d.status === 'closed' || d.status === 'bot') {
           clearInterval(pollTimer); pollTimer = null;
         }
-      })
-      .catch(function(){});
+      }).catch(function () {});
   }, 4000);
 }
 
