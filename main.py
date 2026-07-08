@@ -137,7 +137,7 @@ LANGUAGE_INSTRUCTIONS = {
 }
 
 async def keep_alive():
-    await asyncio.sleep(60)
+    await asyncio.sleep(10)
     while True:
         try:
             async with httpx.AsyncClient(timeout=10) as c:

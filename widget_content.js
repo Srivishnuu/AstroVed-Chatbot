@@ -443,6 +443,11 @@
     'agent','human','team','speak','talk','call me','account','orders','tracking'];
 
   var isOpen=false, launcherOpen=false;
+  // Pre-warm server when page loads
+setTimeout(function(){
+  fetch(API+'/').catch(function(){});
+}, 1000);
+
   var uName='', uEmail='', uPhone='';
   var sessId='av_'+Math.random().toString(36).slice(2);
   var listening=false, recog=null;
