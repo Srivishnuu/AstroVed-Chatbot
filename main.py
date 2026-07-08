@@ -56,16 +56,24 @@ def load_knowledge_base():
 KB_CHUNKS = load_knowledge_base()
 
 def search_knowledge(query: str, top_k: int = 3):
-    if not KB_CHUNKS: return ""
+    """Same as search_knowledge but also returns the matched chunks (with URL/title)
+    so we can build a real topic_url even when there's no TOPIC_MAP entry."""
+    if not KB_CHUNKS:
+        return "", []
     query_words = set(re.findall(r"[a-zA-Z]{3,}", query.lower()))
-    if not query_words: return ""
+    if not query_words:
+        return "", []
     scored = []
     for chunk in KB_CHUNKS:
         haystack = (chunk["title"] + " " + chunk["text"]).lower()
         score = sum(1 for w in query_words if w in haystack)
-        if score > 0: scored.append((score, chunk))
+        if score > 0:
+            scored.append((score, chunk))
     scored.sort(key=lambda x: x[0], reverse=True)
-    return "".join(f"\n[Page: {c['title']}]\nURL: {c['url']}\n{c['text'][:800]}\n" for _, c in scored[:top_k])
+    top = scored[:top_k]
+    text = "".join(f"\n[Page: {c['title']}]\nURL: {c['url']}\n{c['text'][:800]}\n" for _, c in top)
+    matches = [{"title": c["title"], "url": c["url"], "score": s} for s, c in top]
+    return text, matches
 
 def search_knowledge_for_url(url_fragment: str, top_k: int = 2):
     if not KB_CHUNKS: return ""
@@ -319,33 +327,40 @@ async def chat(req: ChatRequest):
             reply = "I understand this needs special attention. Connecting you with our specialist team now — they'll be with you shortly! 🎧"
             save_message(req.session_id, "assistant", reply)
             return {"reply": reply, "mode": "handoff_triggered", "topic_url": None, "topic_label": None}
+        
         detected_lang = detect_language(req.message)
-        topic_url, topic_label = match_topic(req.message)      # ← changed
+        topic_url, topic_label = match_topic(req.message)
         topic_info = None
         if topic_label:
             for _k, _v in TOPIC_MAP.items():
                 if _v["label"] == topic_label:
                     topic_info = _v
                     break
+
         system_content = BASE_SYSTEM_PROMPT + LANGUAGE_INSTRUCTIONS.get(detected_lang, LANGUAGE_INSTRUCTIONS["english"])
+
         if topic_info:
-            url_fragment = topic_info["url"].replace(SITE,"").strip("/").split("/")[0]
+            url_fragment = topic_info["url"].replace(SITE, "").strip("/").split("/")[0]
             kb_content = search_knowledge_for_url(url_fragment) or search_knowledge(req.message, top_k=2)
             if not kb_content:
                 kb_content = f"[Page: {topic_info['label']}]\nURL: {topic_info['url']}\n{topic_info.get('fallback','')}\n"
             system_content += TOPIC_FORCE_INSTRUCTION.format(label=topic_info["label"], content=kb_content)
         else:
-            relevant_content = search_knowledge(req.message, top_k=3)
+            relevant_content, kb_matches = search_knowledge(req.message, top_k=3)
             if relevant_content:
                 system_content += f"\n\n=== RELEVANT WEBSITE CONTENT ===\n{relevant_content}\n=== END CONTENT ==="
-        messages = [{"role":"system","content":system_content}]
+            if not topic_url and kb_matches:
+                topic_url = kb_matches[0]["url"]
+                topic_label = kb_matches[0]["title"]
+
+        # ↓ this line must sit at the SAME indent level as the if/else above (8 spaces),
+        # not nested inside either branch — that's almost certainly what went wrong.
+        messages = [{"role": "system", "content": system_content}]
         for h in history:
-            if h["role"] in ("user","assistant"):
-                messages.append({"role":h["role"],"content":str(h["content"])})
-        messages.append({"role":"user","content":str(req.message)})
-        # FIX (accuracy/timing): lower temperature for more consistent, on-topic,
-        # less "creative" answers, and trim max_tokens slightly so replies stay
-        # focused and arrive faster instead of rambling.
+            if h["role"] in ("user", "assistant"):
+                messages.append({"role": h["role"], "content": str(h["content"])})
+        messages.append({"role": "user", "content": str(req.message)})
+
         response = client.chat.completions.create(
             model="llama-3.1-8b-instant",
             messages=messages,
@@ -353,6 +368,10 @@ async def chat(req: ChatRequest):
             temperature=0.45,
             top_p=0.9,
         )
+        
+        
+        
+        
         reply = response.choices[0].message.content
         save_message(req.session_id, "assistant", reply)
         return {"reply": reply, "mode": "bot", "topic_url": topic_url, "topic_label": topic_label}
