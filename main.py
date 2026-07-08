@@ -38,15 +38,6 @@ def detect_language(text: str) -> str:
     tamil_chars = sum(1 for c in text if '\u0B80' <= c <= '\u0BFF')
     return "tamil" if tamil_chars > 0 else "english"
 
-def match_topic(user_text: str):
-    t = user_text.lower()
-    best, best_len = None, 0
-    for key, info in TOPIC_MAP.items():
-        for kw in info["keywords"]:
-            if kw in t and len(kw) > best_len:
-                best, best_len = key, len(kw)
-    return best
-
 def load_knowledge_base():
     chunks = []
     try:
