@@ -137,6 +137,7 @@ LANGUAGE_INSTRUCTIONS = {
     "english": "\n\nMULTI-LANGUAGE RULE: Reply in clear English.",
 }
 
+# ── Keep alive ────────────────────────────────────────────
 async def keep_alive():
     await asyncio.sleep(10)
     while True:
@@ -148,99 +149,94 @@ async def keep_alive():
             print(f"Keep-alive failed (ok): {e}")
         await asyncio.sleep(600)
 
-@asynccontextmanager
-# ── Auto-scraper job ──────────────────────────────────────
+
+# ── Scheduler ─────────────────────────────────────────────
 async def run_daily_scraper():
     """Runs scraper.py daily, pushes to GitHub, hot-reloads KB"""
     global KB_CHUNKS
     print(f"[SCRAPER] Starting daily scrape at {datetime.now()}")
     try:
         import subprocess
-
         GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
         GITHUB_REPO = os.getenv("GITHUB_REPO", "")
 
         if not GITHUB_TOKEN or not GITHUB_REPO:
             print("[SCRAPER] ERROR: GITHUB_TOKEN or GITHUB_REPO not set!")
+            KB_CHUNKS = load_knowledge_base()
             return
 
-        # ── Step 1: Run scraper ──────────────────────────────
         result = subprocess.run(
             ["python", "scraper.py"],
             capture_output=True,
             text=True,
             timeout=1800
         )
-        print(f"[SCRAPER] Scraper output:\n{result.stdout}")
-        if result.stderr:
-            print(f"[SCRAPER] Scraper errors:\n{result.stderr}")
+        print(f"[SCRAPER] Output:\n{result.stdout}")
 
-        # ── Step 2: Check if files changed ──────────────────
         check = subprocess.run(
             ["git", "status", "--porcelain"],
             capture_output=True,
             text=True
         )
-        
+
         if not check.stdout.strip():
-            print("[SCRAPER] No new pages found — nothing to commit")
+            print("[SCRAPER] No new pages — nothing to commit")
             KB_CHUNKS = load_knowledge_base()
             return
 
-        # ── Step 3: Git config ───────────────────────────────
         subprocess.run(["git", "config", "user.email", "astrovedbot@gmail.com"])
         subprocess.run(["git", "config", "user.name", "AstroVed Scraper Bot"])
-
-        # ── Step 4: Set remote with token ───────────────────
         remote_url = f"https://{GITHUB_TOKEN}@github.com/{GITHUB_REPO}.git"
         subprocess.run(["git", "remote", "set-url", "origin", remote_url])
-
-        # ── Step 5: Add files ────────────────────────────────
         subprocess.run(["git", "add", "knowledge_base.txt", "all_urls.txt"])
-
-        # ── Step 6: Commit ───────────────────────────────────
         date_str = datetime.now().strftime("%Y-%m-%d %H:%M")
-        subprocess.run([
-            "git", "commit", "-m",
-            f"[Auto] Daily scrape update {date_str}"
-        ])
+        subprocess.run(["git", "commit", "-m", f"[Auto] Daily scrape update {date_str}"])
 
-        # ── Step 7: Push to GitHub ───────────────────────────
         push_result = subprocess.run(
             ["git", "push", "origin", "main"],
             capture_output=True,
             text=True
         )
-        
         if push_result.returncode == 0:
-            print("[SCRAPER] ✅ Pushed to GitHub successfully!")
+            print("[SCRAPER] ✅ Pushed to GitHub!")
         else:
             print(f"[SCRAPER] ❌ Push failed:\n{push_result.stderr}")
 
-        # ── Step 8: Hot reload KB ────────────────────────────
         KB_CHUNKS = load_knowledge_base()
-        print(f"[SCRAPER] ✅ KB reloaded: {len(KB_CHUNKS)} chunks now loaded")
+        print(f"[SCRAPER] ✅ KB reloaded: {len(KB_CHUNKS)} chunks")
 
     except subprocess.TimeoutExpired:
-        print("[SCRAPER] ❌ Scraper timed out after 30 minutes!")
+        print("[SCRAPER] ❌ Timeout!")
     except Exception as e:
         print(f"[SCRAPER] ❌ Failed: {e}")
 
-@asynccontextmanager
-@asynccontextmanager
-#@
 
+# ── Lifespan ──────────────────────────────────────────────
+@asynccontextmanager
 async def lifespan(app):
-    # Keep alive ping
     asyncio.create_task(keep_alive())
 
-    # Start scheduler — pass KB reload function
-    start_scheduler(lambda: globals().update(KB_CHUNKS=load_knowledge_base()))
+    scheduler = AsyncIOScheduler(timezone="Asia/Kolkata")
+    scheduler.add_job(
+        run_daily_scraper,
+        trigger="cron",
+        hour=17,
+        minute=30,
+        id="daily_scraper"
+    )
+    scheduler.start()
+
+    next_run = scheduler.get_job("daily_scraper").next_run_time
+    print(f"[SCHEDULER] ✅ Daily scraper scheduled at 5:30 PM IST")
+    print(f"[SCHEDULER] Next run: {next_run}")
 
     yield
 
-    # Stop scheduler on shutdown
-    stop_scheduler()
+    scheduler.shutdown()
+
+
+# ── App ───────────────────────────────────────────────────
+app = FastAPI(lifespan=lifespan)
 
 app = FastAPI(lifespan=lifespan)
 client = Groq(api_key=GROQ_API_KEY)
