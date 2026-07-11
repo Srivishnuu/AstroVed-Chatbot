@@ -611,19 +611,30 @@ setTimeout(function(){
   }
 
   /* ── Send Message ── */
-  function send(){
-    var inp=$('av-inp');
-    var txt=inp.value.trim();
-    if(!txt) return;
-    inp.value=''; inp.style.height='';
-    userMsg(txt);
-    if(CRM_KW.some(function(k){ return txt.toLowerCase().includes(k); })){
-      botMsg('Let me connect you with our specialist team right away!', [], null);
-      setTimeout(showCRM, 800); return;
-    }
-    showTyping();
-    callAPI(txt, 0);
-  }
+  function send() {
+if (isSending) return;
+
+var inp = $('av-inp'); // ✅ correct ID
+if (!inp) return;
+var txt = inp.value.trim();
+if (!txt) return;
+inp.value = ''; inp.style.height = '';
+
+msgCounter++;
+var reqId = msgCounter;
+userMsg(txt, 'm' + msgCounter);
+
+if (CRM_KW.some(function(k){ return txt.toLowerCase().includes(k); })) {
+botMsg('Let me connect you with our specialist team right away!', [], null);
+setTimeout(showCRM, 800);
+return;
+}
+
+isSending = true;
+$('av-send-btn').disabled = true; // ✅ correct ID
+showTyping();
+callAPI(txt, 0, reqId);
+}
 
   function callAPI(txt, attempt){
     setTimeout(function(){
@@ -656,7 +667,7 @@ setTimeout(function(){
         .then(function(r){ return r.json(); })
         .then(function(d){
           d.messages.forEach(function(m){
-            lastMsgId=Math.max(lastMsgId,m.id);
+            $('av-send-btn').disabled = false;
             if(m.role==='assistant') botMsg(m.content,[],null);
             else if(m.role==='system') botMsg('🔔 '+m.content,[],null);
           });
@@ -680,7 +691,7 @@ setTimeout(function(){
   /* ── Opt Buttons ── */
   function doOpt(b){
     var txt=b.textContent.trim();
-    var container=b.closest('.av-opt-btns');
+    $('av-send-btn').disabled = false;
     if(container) container.remove();
     $('av-inp').value=txt; send();
   }
