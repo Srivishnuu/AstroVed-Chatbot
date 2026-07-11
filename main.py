@@ -14,6 +14,7 @@ import asyncio
 import httpx
 import os
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from scheduler import start_scheduler, stop_scheduler, trigger_now
 
 load_dotenv()
 
@@ -226,26 +227,20 @@ async def run_daily_scraper():
         print(f"[SCRAPER] ❌ Failed: {e}")
 
 @asynccontextmanager
+@asynccontextmanager
+#@
+
 async def lifespan(app):
-    # Keep-alive ping (already existed)
+    # Keep alive ping
     asyncio.create_task(keep_alive())
-    
-    # Setup daily scheduler
-    scheduler = AsyncIOScheduler(timezone="Asia/Kolkata")
-    scheduler.add_job(
-        run_daily_scraper,
-        trigger="cron",
-        hour=16,       # 3 PM IST daily
-        minute=30,
-        id="daily_scraper"
-    )
-    scheduler.start()
-    print(f"[SCHEDULER] Daily scraper scheduled at 4.30 PM IST")
-    print(f"[SCHEDULER] Next run: {scheduler.get_job('daily_scraper').next_run_time}")
-    
+
+    # Start scheduler — pass KB reload function
+    start_scheduler(lambda: globals().update(KB_CHUNKS=load_knowledge_base()))
+
     yield
-    
-    scheduler.shutdown()
+
+    # Stop scheduler on shutdown
+    stop_scheduler()
 
 app = FastAPI(lifespan=lifespan)
 client = Groq(api_key=GROQ_API_KEY)
@@ -603,9 +598,11 @@ async def agent_all_sessions():
     
 @app.post("/admin/scrape-now")
 async def scrape_now():
-    """Manually trigger scraper — for testing"""
-    asyncio.create_task(run_daily_scraper())
-    return {"status": "Scraper started in background", "check_logs": True}
+    """Manually trigger scraper"""
+    asyncio.create_task(
+        trigger_now(lambda: globals().update(KB_CHUNKS=load_knowledge_base()))
+    )
+    return {"status": "Scraper started!", "check": "Render logs பாருங்க!"}
 
 @app.post("/admin/reload-kb")
 async def reload_kb():
