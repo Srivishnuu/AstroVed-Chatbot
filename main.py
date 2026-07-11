@@ -13,6 +13,7 @@ import json as json_lib
 import asyncio
 import httpx
 import os
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 load_dotenv()
 
@@ -147,9 +148,50 @@ async def keep_alive():
         await asyncio.sleep(600)
 
 @asynccontextmanager
+# ── Auto-scraper job ──────────────────────────────────────
+async def run_daily_scraper():
+    """Runs scraper.py daily, then hot-reloads KB without restart"""
+    global KB_CHUNKS
+    print(f"[SCRAPER] Starting daily scrape at {datetime.now()}")
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["python", "scraper.py"],
+            capture_output=True,
+            text=True,
+            timeout=1800  # 30 min max
+        )
+        print(f"[SCRAPER] Done. Output:\n{result.stdout}")
+        if result.stderr:
+            print(f"[SCRAPER] Errors:\n{result.stderr}")
+        
+        # Hot-reload KB after scraping
+        KB_CHUNKS = load_knowledge_base()
+        print(f"[SCRAPER] KB reloaded: {len(KB_CHUNKS)} chunks now loaded")
+    except Exception as e:
+        print(f"[SCRAPER] Failed: {e}")
+
+@asynccontextmanager
 async def lifespan(app):
+    # Keep-alive ping (already existed)
     asyncio.create_task(keep_alive())
+    
+    # Setup daily scheduler
+    scheduler = AsyncIOScheduler(timezone="Asia/Kolkata")
+    scheduler.add_job(
+        run_daily_scraper,
+        trigger="cron",
+        hour=3,        # 3 AM IST daily
+        minute=0,
+        id="daily_scraper"
+    )
+    scheduler.start()
+    print(f"[SCHEDULER] Daily scraper scheduled at 3 AM IST")
+    print(f"[SCHEDULER] Next run: {scheduler.get_job('daily_scraper').next_run_time}")
+    
     yield
+    
+    scheduler.shutdown()
 
 app = FastAPI(lifespan=lifespan)
 client = Groq(api_key=GROQ_API_KEY)
@@ -350,8 +392,15 @@ async def chat(req: ChatRequest):
             if relevant_content:
                 system_content += f"\n\n=== RELEVANT WEBSITE CONTENT ===\n{relevant_content}\n=== END CONTENT ==="
             if not topic_url and kb_matches:
-                topic_url = kb_matches[0]["url"]
-                topic_label = kb_matches[0]["title"]
+                query_words = set(re.findall(r"[a-zA-Z]{4,}", req.message.lower()))
+                for match in kb_matches:
+                    match_title_words = set(re.findall(r"[a-zA-Z]{4,}", match["title"].lower()))
+                    match_url_words = set(re.findall(r"[a-zA-Z]{4,}", match["url"].lower()))
+        # Check if any query word appears in the page title or URL
+                    if query_words & (match_title_words | match_url_words):
+                        topic_url = match["url"]
+                        topic_label = match["title"]
+                        break
 
         # ↓ this line must sit at the SAME indent level as the if/else above (8 spaces),
         # not nested inside either branch — that's almost certainly what went wrong.
@@ -497,6 +546,30 @@ async def agent_all_sessions():
         ]}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
+@app.post("/admin/scrape-now")
+async def scrape_now():
+    """Manually trigger scraper — for testing"""
+    asyncio.create_task(run_daily_scraper())
+    return {"status": "Scraper started in background", "check_logs": True}
+
+@app.post("/admin/reload-kb")
+async def reload_kb():
+    """Hot-reload knowledge base without restart"""
+    global KB_CHUNKS
+    KB_CHUNKS = load_knowledge_base()
+    return {"status": "ok", "chunks_loaded": len(KB_CHUNKS)}
+
+@app.get("/admin/scraper-status")
+async def scraper_status():
+    """Check KB status"""
+    return {
+        "kb_chunks_loaded": len(KB_CHUNKS),
+        "kb_file_exists": os.path.exists("knowledge_base.txt"),
+        "urls_file_exists": os.path.exists("all_urls.txt"),
+        "kb_size_kb": round(os.path.getsize("knowledge_base.txt") / 1024, 1) if os.path.exists("knowledge_base.txt") else 0,
+        "urls_scraped": len(open("all_urls.txt").readlines()) if os.path.exists("all_urls.txt") else 0
+    }
 
 
 # ── Enhanced Agent Dashboard HTML ─────────────────────────────────────────────
@@ -1213,6 +1286,12 @@ async def register_user(req: RegisterRequest):
     except Exception as e:
         print(f"register_user unexpected error: {str(e)}")
         return {"StatusCode": 200, "Status": "OK", "Message": "Saved with error fallback"}
+    
+@app.post("/admin/reload-kb")
+async def reload_kb():
+    global KB_CHUNKS
+    KB_CHUNKS = load_knowledge_base()
+    return {"status": "ok", "chunks": len(KB_CHUNKS)}
 
 # Check what is loaded
 @app.get("/debug/env")
