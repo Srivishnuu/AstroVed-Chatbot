@@ -235,12 +235,12 @@ async def lifespan(app):
     scheduler.add_job(
         run_daily_scraper,
         trigger="cron",
-        hour=15,       # 3 PM IST daily
+        hour=16,       # 3 PM IST daily
         minute=30,
         id="daily_scraper"
     )
     scheduler.start()
-    print(f"[SCHEDULER] Daily scraper scheduled at 3 PM IST")
+    print(f"[SCHEDULER] Daily scraper scheduled at 4.30 PM IST")
     print(f"[SCHEDULER] Next run: {scheduler.get_job('daily_scraper').next_run_time}")
     
     yield
