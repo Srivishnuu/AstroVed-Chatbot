@@ -150,26 +150,80 @@ async def keep_alive():
 @asynccontextmanager
 # ── Auto-scraper job ──────────────────────────────────────
 async def run_daily_scraper():
-    """Runs scraper.py daily, then hot-reloads KB without restart"""
+    """Runs scraper.py daily, pushes to GitHub, hot-reloads KB"""
     global KB_CHUNKS
     print(f"[SCRAPER] Starting daily scrape at {datetime.now()}")
     try:
         import subprocess
+
+        GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
+        GITHUB_REPO = os.getenv("GITHUB_REPO", "")
+
+        if not GITHUB_TOKEN or not GITHUB_REPO:
+            print("[SCRAPER] ERROR: GITHUB_TOKEN or GITHUB_REPO not set!")
+            return
+
+        # ── Step 1: Run scraper ──────────────────────────────
         result = subprocess.run(
             ["python", "scraper.py"],
             capture_output=True,
             text=True,
-            timeout=1800  # 30 min max
+            timeout=1800
         )
-        print(f"[SCRAPER] Done. Output:\n{result.stdout}")
+        print(f"[SCRAPER] Scraper output:\n{result.stdout}")
         if result.stderr:
-            print(f"[SCRAPER] Errors:\n{result.stderr}")
+            print(f"[SCRAPER] Scraper errors:\n{result.stderr}")
+
+        # ── Step 2: Check if files changed ──────────────────
+        check = subprocess.run(
+            ["git", "status", "--porcelain"],
+            capture_output=True,
+            text=True
+        )
         
-        # Hot-reload KB after scraping
+        if not check.stdout.strip():
+            print("[SCRAPER] No new pages found — nothing to commit")
+            KB_CHUNKS = load_knowledge_base()
+            return
+
+        # ── Step 3: Git config ───────────────────────────────
+        subprocess.run(["git", "config", "user.email", "astrovedbot@gmail.com"])
+        subprocess.run(["git", "config", "user.name", "AstroVed Scraper Bot"])
+
+        # ── Step 4: Set remote with token ───────────────────
+        remote_url = f"https://{GITHUB_TOKEN}@github.com/{GITHUB_REPO}.git"
+        subprocess.run(["git", "remote", "set-url", "origin", remote_url])
+
+        # ── Step 5: Add files ────────────────────────────────
+        subprocess.run(["git", "add", "knowledge_base.txt", "all_urls.txt"])
+
+        # ── Step 6: Commit ───────────────────────────────────
+        date_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+        subprocess.run([
+            "git", "commit", "-m",
+            f"[Auto] Daily scrape update {date_str}"
+        ])
+
+        # ── Step 7: Push to GitHub ───────────────────────────
+        push_result = subprocess.run(
+            ["git", "push", "origin", "main"],
+            capture_output=True,
+            text=True
+        )
+        
+        if push_result.returncode == 0:
+            print("[SCRAPER] ✅ Pushed to GitHub successfully!")
+        else:
+            print(f"[SCRAPER] ❌ Push failed:\n{push_result.stderr}")
+
+        # ── Step 8: Hot reload KB ────────────────────────────
         KB_CHUNKS = load_knowledge_base()
-        print(f"[SCRAPER] KB reloaded: {len(KB_CHUNKS)} chunks now loaded")
+        print(f"[SCRAPER] ✅ KB reloaded: {len(KB_CHUNKS)} chunks now loaded")
+
+    except subprocess.TimeoutExpired:
+        print("[SCRAPER] ❌ Scraper timed out after 30 minutes!")
     except Exception as e:
-        print(f"[SCRAPER] Failed: {e}")
+        print(f"[SCRAPER] ❌ Failed: {e}")
 
 @asynccontextmanager
 async def lifespan(app):
