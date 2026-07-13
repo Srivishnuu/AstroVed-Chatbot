@@ -878,6 +878,62 @@ TOPIC_MAP = {
     "keywords": ["keyword1", "keyword2", "service name"],
     "url": f"{SITE}/new-page-url",
     "label": "🆕 New Service Name",
+    
+}, ###### reference adding 
+    "karuppasamy_divine_reading": {
+    "keywords": [
+        "karuppasamy",
+        "karuppasamy reading",
+        "karuppasamy remedies",
+        "karuppasamy divine reading",
+        "karuppasamy divine reading remedies",
+        "karuppasamy program",
+        "karuppasamy pooja",
+        "karuppasamy homa",
+        "karuppasamy protection",
+        "karuppasamy blessings",
+        "divine reading",
+        "swift acting god",
+        "guardian deity"
+    ],
+    "url": "https://www.astroved.com/us/specials/karuppasamy-divine-reading-remedies-program?promo=SL_MMH_karuppasamy_reading",
+    "label": "⚔️ Karuppasamy Divine Reading & Remedies Program"
+},
+    
+    "account_access": {
+    "keywords": [
+        "login",
+        "log in",
+        "signin",
+        "sign in",
+        "sign-in",
+        "register",
+        "registration",
+        "register now",
+        "signup",
+        "sign up",
+        "create account",
+        "new account",
+        "new user",
+        "new user registration",
+        "account",
+        "my account",
+        "member login",
+        "user login",
+        "customer login",
+        "forgot password",
+        "reset password",
+        "password reset",
+        "forgot my password",
+        "home",
+        "homepage",
+        "home page",
+        "astroved home",
+        "astroved website",
+        "main website"
+    ],
+    "url": f"{SITE}/",
+    "label": "🏠 AstroVed Home & Account"
 },
 }
 
