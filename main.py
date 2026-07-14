@@ -27,11 +27,16 @@ SITE = "https://www.astroved.com"
 # FIX: kept narrow + specific to real billing/escalation issues, mirrors the
 # widget's CRM_KW list so backend and frontend agree on what truly needs a human.
 HANDOFF_KEYWORDS = [
-    'refund', 'billing issue', 'invoice problem', 'payment failed', 'payment issue',
-    'cancel my subscription', 'complaint', 'talk to agent', 'talk to a human',
+    'crm', 'agent', 'human', 'refund', 'complaint', 'billing',
+    'payment', 'invoice', 'urgent',
+    'billing issue', 'invoice problem', 'payment failed', 'payment issue',
+    'cancel my subscription', 'talk to agent', 'talk to a human',
     'speak to agent', 'speak to a human', 'human agent', 'call me back',
-    'account issue', 'order tracking', 'not working', 'broken', 'urgent help'
+    'account issue', 'order tracking', 'not working', 'urgent help',
+    'connect me', 'real person', 'customer support', 'talk to team',
+    'pricing details', 'price details', 'need support'
 ]
+
 
 def needs_handoff(text: str) -> bool:
     return any(k in text.lower() for k in HANDOFF_KEYWORDS)

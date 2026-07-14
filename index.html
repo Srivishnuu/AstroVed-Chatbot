@@ -478,34 +478,43 @@ body{font-family:var(--font-b);background:var(--deep);min-height:100vh}
      ════════════════════════════════════════════════════ -->
 <script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
 
-var API  = 'https://astroved-chatbot.onrender.com';
-var SITE = 'https://www.astroved.com';
-console.log('API ready:', API); // should print in console
+
 
 /* ─────────────────────────────────────
    CONSTANTS & CONFIG
 ───────────────────────────────────── */
 // Keep this list narrow and phrase-based — mirror the backend's HANDOFF_KEYWORDS
 var CRM_KW = [
-  'refund','billing issue','invoice problem','payment failed','payment issue',
-  'cancel my subscription','complaint','talk to agent','talk to a human',
+  // Direct trigger words (single words)
+  'crm','agent','human','refund','complaint','billing',
+  'payment','invoice','cancel','broken','urgent',
+  
+  // Phrases
+  'billing issue','invoice problem','payment failed','payment issue',
+  'cancel my subscription','talk to agent','talk to a human',
   'speak to agent','speak to a human','human agent','call me back',
-  'account issue','order tracking','not working','broken','urgent help',
-  'connect me','real person','customer support'
+  'account issue','order tracking','not working','urgent help',
+  'connect me','real person','customer support','talk to team',
+  'speak to team','connect me to','need help now','price details',
+  'pricing details','show price','what is the price','how much does',
+  'need support','contact support','reach support'
 ];
 
 function matchesCRM(txt) {
-  var lower = txt.toLowerCase();
+  var lower = txt.toLowerCase().trim();
   return CRM_KW.some(function(k) {
-    if (k.indexOf(' ') > -1) {
-      // multi-word phrase — plain substring check is fine
-      return lower.includes(k);
+    // For single words: exact word match
+    if (k.indexOf(' ') === -1) {
+      var re = new RegExp('\\b' + k + '\\b', 'i');
+      return re.test(lower);
     }
-    // single word — enforce word boundaries so "plan" doesn't match "planet"
-    var re = new RegExp('\\b' + k + '\\b');
-    return re.test(lower);
+    // For phrases: substring match
+    return lower.indexOf(k) > -1;
   });
 }
+
+
+      // 
 /* AstroVed Logo — SVG data URI so it always shows in any environment */
 var API  = 'https://astroved-chatbot.onrender.com';
 var SITE = 'https://www.astroved.com';
@@ -786,7 +795,7 @@ function send() {
   var reqId = msgCounter;
   userMsg(txt, 'm' + msgCounter);
 
-  if (CRM_KW.some(function(k){ return txt.toLowerCase().includes(k); })) {
+   if (matchesCRM(txt)) {
     botMsg('Let me connect you with our specialist team right away!', [], null);
     setTimeout(showCRM, 800);
     return;
@@ -798,52 +807,60 @@ function send() {
 }
 
 function callAPI(txt, attempt, reqId) {
-  var controller = new AbortController();
-  var timeout = setTimeout(function() {
-    controller.abort();
-  }, 15000);
+  // No AbortController — it causes "message channel closed" error
+  var timeoutId = null;
 
   setTimeout(function() {
-    fetch(API + '/chat', {
+    var fetchPromise = fetch(API + '/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      signal: controller.signal,
       body: JSON.stringify({
         session_id: sessId,
         message: txt
       })
-    })
-    .then(function(r) {
-      clearTimeout(timeout);
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      return r.json();
-    })
-    .then(function(d) {
-      if (answeredIds[reqId]) return;
-      answeredIds[reqId] = true;
-      isSending = false;
-      document.getElementById('send-btn').disabled = false;
-      rmTyping();
-      if (d.mode === 'with_agent') { syncThenPoll(); return; }
-      if (d.mode === 'duplicate_blocked') { return; }
-      if (d.mode === 'handoff_triggered') {
-        botMsg(d.reply, [], null);
-        syncThenPoll();
-        return;
-      }
-      var link = (d.topic_url && d.topic_label)
-        ? { url: d.topic_url, label: d.topic_label }
-        : getFallbackLink(txt);
-      botMsg(d.reply || 'Please try again.', [], link);
-    })
-    .catch(function(err) {
-      clearTimeout(timeout);
-      if (answeredIds[reqId]) return;
-      if (err.name === 'AbortError' ||
-          err.message.includes('message channel closed') ||
-          err.message.includes('listener indicated')) {
+    });
+
+    // Manual timeout using Promise.race
+    var timeoutPromise = new Promise(function(_, reject) {
+      timeoutId = setTimeout(function() {
+        reject(new Error('timeout'));
+      }, 20000);
+    });
+
+    Promise.race([fetchPromise, timeoutPromise])
+      .then(function(r) {
+        clearTimeout(timeoutId);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function(d) {
+        if (answeredIds[reqId]) return;
+        answeredIds[reqId] = true;
+        isSending = false;
+        document.getElementById('send-btn').disabled = false;
+        rmTyping();
+
+        if (d.mode === 'with_agent') { syncThenPoll(); return; }
+        if (d.mode === 'duplicate_blocked') { return; }
+        if (d.mode === 'handoff_triggered') {
+          botMsg(d.reply, [], null);
+          syncThenPoll();
+          return;
+        }
+
+        var link = (d.topic_url && d.topic_label)
+          ? { url: d.topic_url, label: d.topic_label }
+          : getFallbackLink(txt);
+        botMsg(d.reply || 'Please try again.', [], link);
+      })
+      .catch(function(err) {
+        clearTimeout(timeoutId);
+        if (answeredIds[reqId]) return;
+
         if (attempt < 2) {
-          setTimeout(function() { callAPI(txt, attempt + 1, reqId); }, 2000);
+          setTimeout(function() {
+            callAPI(txt, attempt + 1, reqId);
+          }, 2500);
         } else {
           answeredIds[reqId] = true;
           isSending = false;
@@ -851,22 +868,9 @@ function callAPI(txt, attempt, reqId) {
           rmTyping();
           botMsg('Connection issue. Please try again! 🔄', [], null);
         }
-        return;
-      }
-      if (attempt < 2) {
-        setTimeout(function() { callAPI(txt, attempt + 1, reqId); }, 2000);
-      } else {
-        answeredIds[reqId] = true;
-        isSending = false;
-        document.getElementById('send-btn').disabled = false;
-        rmTyping();
-        botMsg('Server is waking up… Please resend in 30 seconds! 🔄', [], null);
-      }
-    });
-  }, 200);
+      });
+  }, 100); // reduced from 200ms → 100ms for speed
 }
-
-
       
 
 /* ─────────────────────────────────────
