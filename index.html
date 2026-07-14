@@ -477,24 +477,7 @@ body{font-family:var(--font-b);background:var(--deep);min-height:100vh}
      ALL JAVASCRIPT — GLOBAL SCOPE ONLY — NO NESTING
      ════════════════════════════════════════════════════ -->
 <script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
-
-
-/* ── Keep server warm — ping every 8 minutes ── */
-(function keepWarm() {
-  fetch(API + '/', { method: 'GET' })
-    .catch(function() {}); // silent fail is fine
-  setInterval(function() {
-    fetch(API + '/', { method: 'GET' }).catch(function() {});
-  }, 480000); // every 8 min
-})();
-
-
-/* ── Pre-warm on page load ── */
-window.addEventListener('load', function() {
-  setTimeout(function() {
-    fetch(API + '/').catch(function() {});
-  }, 500);
-});
+  
 
 /* ─────────────────────────────────────
    CONSTANTS & CONFIG
