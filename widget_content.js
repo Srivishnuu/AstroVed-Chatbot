@@ -452,6 +452,10 @@ setTimeout(function(){
   var sessId='av_'+Math.random().toString(36).slice(2);
   var listening=false, recog=null;
   var msgCounter=0, pollTimer=null, lastMsgId=0;
+  // Around line: var msgCounter=0, pollTimer=null, lastMsgId=0;
+// ADD this line right after:
+  var isSending = false;
+  var answeredIds = {};
 
   /* ── Helpers ── */
   function $(id){ return document.getElementById(id); }
@@ -612,31 +616,32 @@ setTimeout(function(){
 
   /* ── Send Message ── */
   function send() {
-if (isSending) return;
+    if (isSending) return;
 
-var inp = $('av-inp'); // ✅ correct ID
-if (!inp) return;
-var txt = inp.value.trim();
-if (!txt) return;
-inp.value = ''; inp.style.height = '';
+    var inp = $('av-inp');
+    if (!inp) return;
+    var txt = inp.value.trim();
+    if (!txt) return;
+    inp.value = ''; inp.style.height = '';
 
-msgCounter++;
-var reqId = msgCounter;
-userMsg(txt, 'm' + msgCounter);
+    msgCounter++;
+    var reqId = msgCounter;
+    userMsg(txt);
 
-if (CRM_KW.some(function(k){ return txt.toLowerCase().includes(k); })) {
-botMsg('Let me connect you with our specialist team right away!', [], null);
-setTimeout(showCRM, 800);
-return;
+    if (CRM_KW.some(function(k){ return txt.toLowerCase().includes(k); })) {
+        botMsg('Let me connect you with our specialist team right away!', [], null);
+        setTimeout(showCRM, 800);
+        return;
+    }
+
+    isSending = true;
+    $('av-send-btn').disabled = true;
+    showTyping();
+    callAPI(txt, 0, reqId);
 }
 
-isSending = true;
-$('av-send-btn').disabled = true; // ✅ correct ID
-showTyping();
-callAPI(txt, 0, reqId);
-}
 
-  function callAPI(txt, attempt){
+  function callAPI(txt, attempt, reqId){
     setTimeout(function(){
       fetch(API+'/chat',{
         method:'POST', headers:{'Content-Type':'application/json'},
@@ -644,6 +649,8 @@ callAPI(txt, 0, reqId);
       })
       .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
       .then(function(d){
+        isSending = false;                        // ← reset here
+        $('av-send-btn').disabled = false;        // ← re-enable here
         rmTyping();
         if(d.mode==='with_agent'){ syncThenPoll(); return; }
         if(d.mode==='handoff_triggered'){ botMsg(d.reply,[],null); syncThenPoll(); return; }
@@ -653,11 +660,16 @@ callAPI(txt, 0, reqId);
         botMsg(d.reply||'Please try again.', [], link);
       })
       .catch(function(){
-        if(attempt<2){ setTimeout(function(){ callAPI(txt, attempt+1); }, 2000); }
-        else{ rmTyping(); botMsg('Server is waking up… Please resend in 30 seconds! 🔄',[],null); }
+        if(attempt<2){ setTimeout(function(){ callAPI(txt, attempt+1, reqId); }, 2000); }
+        else{
+          isSending = false;                      // ← reset on error too
+          $('av-send-btn').disabled = false;
+          rmTyping();
+          botMsg('Server is waking up… Please resend in 30 seconds! 🔄',[],null);
+        }
       });
     }, 200);
-  }
+}
 
   /* ── Polling ── */
   function startPolling(){
@@ -690,37 +702,47 @@ callAPI(txt, 0, reqId);
 
   /* ── Opt Buttons ── */
   function doOpt(b){
-    var txt=b.textContent.trim();
-    $('av-send-btn').disabled = false;
+    var txt = b.textContent.trim();
+    var container = b.closest('.av-opt-btns');  // ← was undefined variable
     if(container) container.remove();
-    $('av-inp').value=txt; send();
-  }
+    $('av-inp').value = txt;
+    send();
+}
 
   /* ── CRM Panel ── */
-  function showCRM(){
-  var m = document.getElementById('msgs');  // $ → document.getElementById
-  var row = document.createElement('div');
-  row.className = 'mrow bot';
-  row.innerHTML =
-    '<div class="av bot"><img src="'+LOGO_SRC+'" alt="bot"/></div>' +
-    '<div class="bbl bot">' +
-      '🎧 <strong>Connect with Our Team</strong><br>Choose how you\'d like to reach us:' +
-      '<div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">' +
-        '<a class="link-btn" style="justify-content:center" href="https://api.whatsapp.com/send?phone=919677391109&text='+encodeURIComponent('Hello, I need assistance.')+'" target="_blank" rel="noopener">💬 WhatsApp — +91 96773 91109</a>' +
-        '<a class="link-btn" style="justify-content:center" href="mailto:support@astroved.com">✉️ Email — support@astroved.com</a>' +
-        '<a class="link-btn" style="justify-content:center" href="tel:+919677391108">📞 Call — +91 96773 91108</a>' +
-      '</div>' +
-    '</div>';
-  m.appendChild(row);
-  scrl();
+ function showCRM(){
+    var m = $('av-msgs');  // ← was document.getElementById('msgs') — WRONG ID
+    var row = document.createElement('div');
+    row.className = 'av-mrow av-bot';
+    row.innerHTML =
+      '<div class="av-av av-bot"><img src="'+LOGO_SRC+'" alt="bot"/></div>' +
+      '<div class="av-bbl av-bot">' +
+        '🎧 <strong>Connect with Our Team</strong><br>Choose how you\'d like to reach us:' +
+        '<div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">' +
+          '<a class="av-link-btn" style="justify-content:center" href="https://api.whatsapp.com/send?phone=919677391109&text='+encodeURIComponent('Hello, I need assistance.')+'" target="_blank" rel="noopener">💬 WhatsApp — +91 96773 91109</a>' +
+          '<a class="av-link-btn" style="justify-content:center" href="mailto:support@astroved.com">✉️ Email — support@astroved.com</a>' +
+          '<a class="av-link-btn" style="justify-content:center" href="tel:+919677391108">📞 Call — +91 96773 91108</a>' +
+        '</div>' +
+      '</div>';
+    m.appendChild(row);
+    scrl();
 
-  fetch(API+'/handoff',{
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({session_id:sessId, user_name:uName,
-      user_email:uEmail, user_phone:uPhone, issue_type:'support_request', priority:'normal'})
-  }).catch(function(){});
-  syncThenPoll();
+    // ← This POST triggers the dashboard notification
+    fetch(API+'/handoff',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        session_id: sessId,
+        user_name:  uName,
+        user_email: uEmail,
+        user_phone: uPhone,
+        issue_type: 'support_request',
+        priority:   'normal'
+      })
+    }).catch(function(){});
+
+    syncThenPoll();
 }
+
     
   function backChat(){
     $('av-crm-panel').classList.remove('av-active');
