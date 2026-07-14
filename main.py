@@ -13,8 +13,6 @@ import json as json_lib
 import asyncio
 import httpx
 import os
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from scheduler import start_scheduler, stop_scheduler, trigger_now
 
 load_dotenv()
 
@@ -27,16 +25,11 @@ SITE = "https://www.astroved.com"
 # FIX: kept narrow + specific to real billing/escalation issues, mirrors the
 # widget's CRM_KW list so backend and frontend agree on what truly needs a human.
 HANDOFF_KEYWORDS = [
-    'crm', 'agent', 'human', 'refund', 'complaint', 'billing',
-    'payment', 'invoice', 'urgent',
-    'billing issue', 'invoice problem', 'payment failed', 'payment issue',
-    'cancel my subscription', 'talk to agent', 'talk to a human',
+    'refund', 'billing issue', 'invoice problem', 'payment failed', 'payment issue',
+    'cancel my subscription', 'complaint', 'talk to agent', 'talk to a human',
     'speak to agent', 'speak to a human', 'human agent', 'call me back',
-    'account issue', 'order tracking', 'not working', 'urgent help',
-    'connect me', 'real person', 'customer support', 'talk to team',
-    'pricing details', 'price details', 'need support'
+    'account issue', 'order tracking', 'not working', 'broken', 'urgent help'
 ]
-
 
 def needs_handoff(text: str) -> bool:
     return any(k in text.lower() for k in HANDOFF_KEYWORDS)
@@ -142,7 +135,6 @@ LANGUAGE_INSTRUCTIONS = {
     "english": "\n\nMULTI-LANGUAGE RULE: Reply in clear English.",
 }
 
-# ── Keep alive ────────────────────────────────────────────
 async def keep_alive():
     await asyncio.sleep(10)
     while True:
@@ -154,94 +146,10 @@ async def keep_alive():
             print(f"Keep-alive failed (ok): {e}")
         await asyncio.sleep(600)
 
-
-# ── Scheduler ─────────────────────────────────────────────
-async def run_daily_scraper():
-    """Runs scraper.py daily, pushes to GitHub, hot-reloads KB"""
-    global KB_CHUNKS
-    print(f"[SCRAPER] Starting daily scrape at {datetime.now()}")
-    try:
-        import subprocess
-        GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
-        GITHUB_REPO = os.getenv("GITHUB_REPO", "")
-
-        if not GITHUB_TOKEN or not GITHUB_REPO:
-            print("[SCRAPER] ERROR: GITHUB_TOKEN or GITHUB_REPO not set!")
-            KB_CHUNKS = load_knowledge_base()
-            return
-
-        result = subprocess.run(
-            ["python", "scraper.py"],
-            capture_output=True,
-            text=True,
-            timeout=1800
-        )
-        print(f"[SCRAPER] Output:\n{result.stdout}")
-
-        check = subprocess.run(
-            ["git", "status", "--porcelain"],
-            capture_output=True,
-            text=True
-        )
-
-        if not check.stdout.strip():
-            print("[SCRAPER] No new pages — nothing to commit")
-            KB_CHUNKS = load_knowledge_base()
-            return
-
-        subprocess.run(["git", "config", "user.email", "astrovedbot@gmail.com"])
-        subprocess.run(["git", "config", "user.name", "AstroVed Scraper Bot"])
-        remote_url = f"https://{GITHUB_TOKEN}@github.com/{GITHUB_REPO}.git"
-        subprocess.run(["git", "remote", "set-url", "origin", remote_url])
-        subprocess.run(["git", "add", "knowledge_base.txt", "all_urls.txt"])
-        date_str = datetime.now().strftime("%Y-%m-%d %H:%M")
-        subprocess.run(["git", "commit", "-m", f"[Auto] Daily scrape update {date_str}"])
-
-        push_result = subprocess.run(
-            ["git", "push", "origin", "main"],
-            capture_output=True,
-            text=True
-        )
-        if push_result.returncode == 0:
-            print("[SCRAPER] ✅ Pushed to GitHub!")
-        else:
-            print(f"[SCRAPER] ❌ Push failed:\n{push_result.stderr}")
-
-        KB_CHUNKS = load_knowledge_base()
-        print(f"[SCRAPER] ✅ KB reloaded: {len(KB_CHUNKS)} chunks")
-
-    except subprocess.TimeoutExpired:
-        print("[SCRAPER] ❌ Timeout!")
-    except Exception as e:
-        print(f"[SCRAPER] ❌ Failed: {e}")
-
-
-# ── Lifespan ──────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app):
     asyncio.create_task(keep_alive())
-
-    scheduler = AsyncIOScheduler(timezone="Asia/Kolkata")
-    scheduler.add_job(
-        run_daily_scraper,
-        trigger="cron",
-        hour=18,
-        minute=10,
-        id="daily_scraper"
-    )
-    scheduler.start()
-
-    next_run = scheduler.get_job("daily_scraper").next_run_time
-    print(f"[SCHEDULER] ✅ Daily scraper scheduled at 6:10 PM IST")
-    print(f"[SCHEDULER] Next run: {next_run}")
-
     yield
-
-    scheduler.shutdown()
-
-
-# ── App ───────────────────────────────────────────────────
-app = FastAPI(lifespan=lifespan)
 
 app = FastAPI(lifespan=lifespan)
 client = Groq(api_key=GROQ_API_KEY)
@@ -442,15 +350,8 @@ async def chat(req: ChatRequest):
             if relevant_content:
                 system_content += f"\n\n=== RELEVANT WEBSITE CONTENT ===\n{relevant_content}\n=== END CONTENT ==="
             if not topic_url and kb_matches:
-                query_words = set(re.findall(r"[a-zA-Z]{4,}", req.message.lower()))
-                for match in kb_matches:
-                    match_title_words = set(re.findall(r"[a-zA-Z]{4,}", match["title"].lower()))
-                    match_url_words = set(re.findall(r"[a-zA-Z]{4,}", match["url"].lower()))
-        # Check if any query word appears in the page title or URL
-                    if query_words & (match_title_words | match_url_words):
-                        topic_url = match["url"]
-                        topic_label = match["title"]
-                        break
+                topic_url = kb_matches[0]["url"]
+                topic_label = kb_matches[0]["title"]
 
         # ↓ this line must sit at the SAME indent level as the if/else above (8 spaces),
         # not nested inside either branch — that's almost certainly what went wrong.
@@ -596,32 +497,6 @@ async def agent_all_sessions():
         ]}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    
-@app.post("/admin/scrape-now")
-async def scrape_now():
-    """Manually trigger scraper"""
-    asyncio.create_task(
-        trigger_now(lambda: globals().update(KB_CHUNKS=load_knowledge_base()))
-    )
-    return {"status": "Scraper started!", "check": "Render logs பாருங்க!"}
-
-@app.post("/admin/reload-kb")
-async def reload_kb():
-    """Hot-reload knowledge base without restart"""
-    global KB_CHUNKS
-    KB_CHUNKS = load_knowledge_base()
-    return {"status": "ok", "chunks_loaded": len(KB_CHUNKS)}
-
-@app.get("/admin/scraper-status")
-async def scraper_status():
-    """Check KB status"""
-    return {
-        "kb_chunks_loaded": len(KB_CHUNKS),
-        "kb_file_exists": os.path.exists("knowledge_base.txt"),
-        "urls_file_exists": os.path.exists("all_urls.txt"),
-        "kb_size_kb": round(os.path.getsize("knowledge_base.txt") / 1024, 1) if os.path.exists("knowledge_base.txt") else 0,
-        "urls_scraped": len(open("all_urls.txt").readlines()) if os.path.exists("all_urls.txt") else 0
-    }
 
 
 # ── Enhanced Agent Dashboard HTML ─────────────────────────────────────────────
@@ -1338,12 +1213,6 @@ async def register_user(req: RegisterRequest):
     except Exception as e:
         print(f"register_user unexpected error: {str(e)}")
         return {"StatusCode": 200, "Status": "OK", "Message": "Saved with error fallback"}
-    
-@app.post("/admin/reload-kb")
-async def reload_kb():
-    global KB_CHUNKS
-    KB_CHUNKS = load_knowledge_base()
-    return {"status": "ok", "chunks": len(KB_CHUNKS)}
 
 # Check what is loaded
 @app.get("/debug/env")
